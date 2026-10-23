@@ -136,7 +136,7 @@ export const DEFAULT_STYLE: InkStyle = {
     [CLS.BLOSSOM]: { wash: [0.09, 0.1, 1, 0], line: [0.05, 0, 0.3, 0.8], marks: [1.0, 5, MARK.BLOSSOM], tint: [0.84, 0.46, 0.5, 0.62] },
     [CLS.BLOOM]: { wash: [0.02, 0.06, 1.5, 0.1], line: [0.75, 0.5, 0.2, 0.8], tint: [0.9, 0.55, 0.6, 0.4] },
     // 墨荷: each lotus leaf one flat wet wash of its own depth (src/shaders/ink.wgsl), veins drawn near
-    [CLS.LOTUS]: { wash: [0.5, 0.3, 1, 0.15], line: [0.16, 0, 0.3, 1.0], marks: [0.55, 6, MARK.NONE] },
+    [CLS.LOTUS]: { wash: [0.28, 0.25, 1, 0.15], line: [0.16, 0, 0.3, 1.0], marks: [0.55, 6, MARK.NONE] },
     [CLS.IVY]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.3, 0, 0.3, 0.8], marks: [0.6, 4, MARK.LEAF] },
   },
 };
