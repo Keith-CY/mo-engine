@@ -78,6 +78,13 @@ export class Engine {
     const r = L.ink?.ranges;
     if (Array.isArray(r) && r.length >= 8) st.look.ranges = r.slice(0, 8) as NonNullable<typeof st.look.ranges>;
     if ((L.season ?? 'spring') !== 'spring' && st.look.petals) st.look.petals = [0, st.look.petals[1], st.look.petals[2], st.look.petals[3]];
+    // 留白 measured from the look's own viewpoint
+    const ink = L.ink ?? {};
+    const vp = this.scene.viewpoints.find((v) => v.id === L.id);
+    if (vp) st.look.shotPos = vp.position;
+    if (typeof ink.groundY === 'number') st.look.groundY = ink.groundY;
+    if (Array.isArray(ink.bands)) st.look.bands = (ink.bands as number[][]).slice(0, 3).map((b) => [b[0], b[1], b[2], b[3]] as [number, number, number, number]);
+    if (Array.isArray(ink.mist) && ink.mist.length >= 4) st.look.mist = (ink.mist as number[]).slice(0, 4) as [number, number, number, number];
     this.renderer.setStyle(st);
   }
   private baseStyle?: InkStyle;

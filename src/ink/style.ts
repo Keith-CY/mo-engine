@@ -41,6 +41,13 @@ export interface Look {
   /** the wash laid in this many layers (墨分五色; 0: smooth), and the dark rim where a layer ends (水渍) */
   layers?: number;
   pool?: number;
+  /** 留白, measured from the look's own viewpoint `shotPos` (ground height `groundY` there): up to three bands of mist
+   *  lying low at a distance from it ([distance, half width, amount, ceiling m]), and mist below a height ([y0, y1,
+   *  beyond this distance, amount]) */
+  shotPos?: [number, number, number];
+  groundY?: number;
+  bands?: [number, number, number, number][];
+  mist?: [number, number, number, number];
 }
 
 export interface InkStyle {

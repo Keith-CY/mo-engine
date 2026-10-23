@@ -369,6 +369,27 @@ fn fs(v: VOut) -> @location(0) vec4f {
   edge *= mix(1.0, 0.6, smoothstep(60.0, 600.0, dist)) * lineK;
   ink = max(ink, edge * F.ink.w);
 
+  // ---- 留白: mist lying low in bands at distances from the look's viewpoint, and below a height, its edges ragged with
+  // a world noise (both fixed to the world: walking through them, they stay where they lie)
+  if (cls != C_WATER) {
+    var mist = 0.0;
+    let bn = zoomNoise(P * vec3f(1.0, 3.0, 1.0) + vec3f(23.0), footprint, 90.0, vec3f(0.0));
+    let dS = length(P.xz - F.shotPos.xz);
+    for (var k = 0; k < 3; k++) {
+      let b = F.bands[k];
+      if (b.z <= 0.0) { continue; }
+      let along = 1.0 - smoothstep(b.y * 0.35, b.y, abs(dS - b.x) + (bn - 0.5) * b.y * 0.7);
+      let low = 1.0 - smoothstep(b.w * 0.45, b.w, P.y - F.shotPos.w + (bn - 0.5) * b.w * 0.8);
+      mist = max(mist, along * low * b.z * select(1.0, 0.45, isArch(cls)));
+    }
+    let M = F.mist;
+    if (M.w > 0.0) {
+      let mn = zoomNoise(P * vec3f(1.0, 4.0, 1.0) + vec3f(11.0), footprint, 120.0, vec3f(0.0));
+      mist = max(mist, (1.0 - smoothstep(M.x, M.y, P.y + (mn - 0.5) * (M.y - M.x) * 1.2)) * smoothstep(M.z, M.z * 1.6, dist) * M.w);
+    }
+    ink *= 1.0 - clamp(mist, 0.0, 1.0);
+  }
+
   // ---- into the haze: ink fades with distance (the class can carry further: far hills)
   let haze = exp(-dist / (F.look.x * hazeScale));
   ink = clamp(ink * haze, 0.0, 1.0);
