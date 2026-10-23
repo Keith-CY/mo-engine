@@ -1,0 +1,24 @@
+{
+  "name": "@lapla/mo",
+  "version": "0.0.1",
+  "description": "Mo (墨): a WebGPU engine for walkable worlds painted as Chinese ink",
+  "main": "dist/mo.js",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "check": "tsc -p .",
+    "demo": "node tools/serve.mjs",
+    "comfort": "node tools/comfort/run.mjs"
+  },
+  "license": "MIT",
+  "type": "module",
+  "devDependencies": {
+    "@webgpu/types": "^0.1.74",
+    "esbuild": "^0.28.2",
+    "puppeteer-core": "^25.16.0",
+    "typescript": "5.9"
+  },
+  "dependencies": {
+    "wgpu-matrix": "^3.4.2"
+  },
+  "private": true
+}

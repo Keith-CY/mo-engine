@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mo demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #efe8d6; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 12px; bottom: 10px; font: 12px/1.5 ui-monospace, Menlo, monospace; color: #3a352d; background: rgba(239, 232, 214, .8); padding: 4px 8px; border-radius: 3px; white-space: pre; }
+  #err { position: fixed; inset: 0; display: none; place-items: center; font: 16px system-ui; color: #3a352d; padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<div id="err"></div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

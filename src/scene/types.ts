@@ -1,0 +1,95 @@
+/**
+ * A world in memory, as a mo-scene describes it (docs/SCENE_FORMAT.md): meshes, LOD groups, batches of instances,
+ * terrain heightfields, water, the sun and the viewpoints.
+ */
+export interface MeshData {
+  name: string;
+  cls: number;
+  positions: Float32Array;
+  normals: Float32Array;
+  /** albedo luminance per vertex (0..1); absent: `tone` for the whole mesh */
+  tones?: Float32Array;
+  tone: number;
+  indices: Uint32Array;
+  /** bounding sphere in the mesh's own space */
+  center: [number, number, number];
+  radius: number;
+}
+
+export interface LodLevel {
+  mesh: number;
+  /** used up to this distance from the eye (m) */
+  to: number;
+}
+
+export interface LodGroup {
+  name: string;
+  levels: LodLevel[];
+}
+
+export type Batch = { mesh: number; first: number; count: number } | { lodGroup: number; first: number; count: number };
+
+export interface Heightfield {
+  origin: [number, number];
+  cell: number;
+  width: number;
+  depth: number;
+  heights: Float32Array;
+}
+
+export interface Viewpoint {
+  id: number;
+  name: string;
+  position: [number, number, number];
+  target: [number, number, number];
+  fovY: number;
+}
+
+export interface SceneData {
+  name: string;
+  classes: Record<string, number>;
+  meshes: MeshData[];
+  lodGroups: LodGroup[];
+  batches: Batch[];
+  /** 64-byte records (docs/SCENE_FORMAT.md, instances.bin) */
+  instances: ArrayBuffer;
+  instanceCount: number;
+  terrain?: { near?: Heightfield; far?: Heightfield; cls: number };
+  water: { name: string; level: number; mesh: number }[];
+  /** towards the sun, unit length */
+  sun: [number, number, number];
+  viewpoints: Viewpoint[];
+}
+
+export const INSTANCE_BYTES = 64;
+export const CLASS_OWN = 0xffffffff;
+export const FLAG_SHADOW = 1, FLAG_TWO_SIDED = 2, FLAG_WATER = 4;
+
+/** the class ids the linan world uses (its src/ink/gbuffer.js CLS); a scene's own table wins */
+export const CLS = {
+  SKY: 0, GROUND: 1, ROCK: 2, WATER: 3, ROOF: 4, WOOD: 5, WALL: 6, STONE: 7, PINE: 8, WILLOW: 9, BROAD: 10,
+  BARK: 11, FIGURE: 12, GLOW: 13, BOAT: 14, SMALL: 15, BLOSSOM: 16, WAVE: 17, MAPLE: 18, CITYFAR: 19, SNOW: 20,
+  DARK: 21, METAL: 22, GINKGO: 23, LOTUS: 24, NICHE: 25, IVY: 26, PAVE: 27, BLOOM: 28,
+} as const;
+
+/** writes one instance record: a 3 × 4 affine transform by columns (X axis, Y axis, Z axis, translation) */
+export function writeInstance(
+  view: DataView, i: number, m: ArrayLike<number>, cls: number, seed: number, tone = 1, flags = FLAG_SHADOW,
+): void {
+  const o = i * INSTANCE_BYTES;
+  for (let k = 0; k < 12; k++) view.setFloat32(o + k * 4, m[k], true);
+  view.setUint32(o + 48, cls >>> 0, true);
+  view.setUint32(o + 52, seed >>> 0, true);
+  view.setFloat32(o + 56, tone, true);
+  view.setUint32(o + 60, flags >>> 0, true);
+}
+
+/** the height of a heightfield at world (x, z), bilinear; NaN outside */
+export function heightAt(h: Heightfield, x: number, z: number): number {
+  const fx = (x - h.origin[0]) / h.cell, fz = (z - h.origin[1]) / h.cell;
+  if (fx < 0 || fz < 0 || fx > h.width - 1 || fz > h.depth - 1) return NaN;
+  const ix = Math.min(h.width - 2, Math.floor(fx)), iz = Math.min(h.depth - 2, Math.floor(fz));
+  const tx = fx - ix, tz = fz - iz, w = h.width, H = h.heights;
+  const a = H[iz * w + ix], b = H[iz * w + ix + 1], c = H[(iz + 1) * w + ix], d = H[(iz + 1) * w + ix + 1];
+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+}
