@@ -85,6 +85,34 @@ fn ripples(P: vec3f, fp: f32, dens: f32, mode: f32, sinG: f32) -> f32 {
   return cov;
 }
 
+/** 水纹: rows of drawn wave lines over the whole water (马远《水图》), rows kept ~rowPx apart on the screen, in the
+ *  frame of the look's viewpoint, broken into strokes */
+fn waveRows(P: vec3f, fp: f32, sinG: f32, dens: f32, amp: f32, rowPx: f32) -> f32 {
+  let f2 = normalize(F.shotDir.xy + vec2f(1e-6, 0.0));
+  let r2 = vec2f(f2.y, -f2.x);
+  let q = vec2f(dot(P.xz, r2), dot(P.xz, f2));
+  let uK = F.viewport.x / 1664.0;
+  let pxPerV = sinG / max(fp, 1e-5);
+  let l = log2(rowPx * uK / pxPerV);
+  let l0 = floor(l);
+  let t = smoothstep(0.0, 1.0, l - l0);
+  var cov = 0.0;
+  for (var L = 0; L < 2; L++) {
+    let lev = l0 + f32(L);
+    let Sv = exp2(lev);
+    let Su = Sv * 4.5 * max(sinG, 0.03);
+    let ph = vnoise2(vec2f(q.x / (Su * 5.0), q.y / (Sv * 4.0)) + lev) * 2.0;
+    let g = q.y / Sv + amp * abs(sin(3.14159 * (q.x / Su + ph)));
+    let k = floor(g + 0.5);
+    let dpx = abs(g - k) * Sv * pxPerV;
+    let w = 0.45 * uK;
+    var c = 1.0 - smoothstep(w - 0.3 * uK, w + 0.6 * uK, dpx);
+    c *= smoothstep(1.0 - dens, 1.0 - dens + 0.15, vnoise2(vec2f(q.x / (Su * 1.7), k * 1.37 + lev * 3.0)));
+    cov += c * select(t, 1.0 - t, L == 0);
+  }
+  return cov;
+}
+
 /** a night painting: the day's painting graded into the night's indigo (paper a deep blue, ink near black-blue) */
 fn nightGrade(c: vec3f) -> vec3f {
   let l = dot(c, vec3f(0.3, 0.55, 0.15));
@@ -96,7 +124,7 @@ fn cloudsAt(dirW: vec3f) -> vec2f {
   let H = 2000.0;
   let q = (F.eye.xz + dirW.xz * ((H - F.eye.y) / dirW.y)) / 900.0;
   let n = fbm3(vec3f(q, 0.7), 4);
-  let cover = smoothstep(0.52, 0.66, n) * smoothstep(0.01, 0.08, dirW.y);
+  let cover = smoothstep(0.44, 0.58, n) * smoothstep(0.01, 0.08, dirW.y);
   // the underside: where the noise falls toward the sun's side below the cloud, a grey wash
   let nU = fbm3(vec3f(q + vec2f(0.0, -0.06), 0.7), 4);
   return vec2f(cover, clamp((n - nU) * 6.0, 0.0, 1.0) * cover);
@@ -188,6 +216,22 @@ fn paintedRanges(dirW: vec3f) -> f32 {
       // a range is not one even strip: long stretches darker or lost in mist, and a soft top edge
       let mot = vnoise2(d2 * (7.0 + 2.0 * fk) + fk * 4.1) * 0.65 + vnoise2(d2 * 23.0 + fk * 1.7) * 0.35;
       w *= (0.35 + 0.95 * smoothstep(0.25, 0.75, mot)) * smoothstep(0.0, F.params.x * 2.5, below);
+      if (F.lines.z > 0.5) {
+        // a snowy range: left as paper, drawn by its ridge line, a few crevices running down from it and a pale grey on
+        // the shaded side of each spur; the farther range a pale grey wash lost in mist (q: pixels on the sky sphere)
+        let qp = vec2f(az, el) / F.params.x;
+        let line = (1.0 - smoothstep(0.4, 1.8, below / F.params.x)) * (0.55 + 0.45 * smoothstep(0.3, 0.6, vnoise2(qp / 30.0 + fk)));
+        let gs = smoothstep(0.4, 0.6, vnoise2(qp / 70.0 + fk * 5.0));
+        let c1 = smoothstep(0.74, 0.86, vnoise2(vec2f((qp.x + 0.7 * qp.y) / 3.0, qp.y / 45.0) + fk * 13.0));
+        let c2 = smoothstep(0.74, 0.86, vnoise2(vec2f((qp.x - 0.7 * qp.y) / 3.0, qp.y / 45.0) + fk * 17.0));
+        let crev = mix(c1, c2, gs) * smoothstep(0.3, 0.6, vnoise2(qp / 35.0 + 3.0 + fk));
+        let sp0 = vnoise2(vec2f((qp.x + 0.8 * qp.y) / 38.0, qp.y / 200.0) + fk * 7.0);
+        let spur = smoothstep(0.5, 0.62, sp0) * (0.6 + 0.4 * vnoise2(qp / 12.0));
+        let dn = exp(-below / (fade * 0.9));
+        let mo2 = vnoise2(d2 * 9.0 + fk * 4.1);
+        w = select(ink * 0.22 * exp(-below / fade) * (0.4 + 0.9 * mo2) * smoothstep(0.0, F.params.x * 3.0, below),
+                   ink * (0.9 * line + 0.6 * crev * exp(-below / (fade * 0.45)) + 0.28 * spur * dn), kk < 0.5);
+      }
       res = w;
     }
   }
@@ -403,7 +447,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     var cl = vec2f(0.0);
     if (F.accent.w > 0.0) { cl = cloudsAt(dirW) * min(1.0, F.accent.w * 2.0); }
     // clouds: their shaded undersides a soft grey wash, their lit tops paper
-    var ink = max(max(wash * (1.0 - 0.7 * cl.x), rng), 0.22 * cl.y);
+    var ink = max(max(wash * (1.0 - 0.7 * cl.x), rng * (1.0 - 0.8 * cl.x)), 0.32 * cl.y);
     if (F.water.w > 0.0) { ink = max(ink, 0.12 * F.water.w * cloudBandsAt(dirW)); }
     // a low sun's halo: the sky round it left paper
     ink *= 1.0 - F.accent.z * exp(-sunAng / 0.09);
@@ -430,7 +474,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let Bv = textureLoad(gB, p, 0);
   let Cv = textureLoad(gC, p, 0);
   let cls = min(u32(A.w + 0.5), 31u);
-  // debug views (?debug=): 1 class, 2 cast shadow and sun, 3 normals, 4 joints
+  // debug views (?debug=): 1 class, 2 cast shadow and sun, 3 normals, 4 joints, 6 the water's wave lines (r)
   let dbg = u32(F.counts.w + 0.5);
   if (dbg == 1u) { return vec4f(0.5 + 0.5 * cos(6.2831 * (f32(cls) * 0.137 + vec3f(0.0, 0.33, 0.67))), 1.0); }
   if (dbg == 2u || dbg == 5u) { return vec4f(Bv.w, Bv.x, Bv.y, 1.0); }
@@ -486,10 +530,16 @@ fn fs(v: VOut) -> @location(0) vec4f {
       }
     }
     ink = F.water.x * (0.75 + 0.5 * wn);
-    // ripple lines (the look's `waves`), 水纹 rows where it asks for them (waveMode 1)
+    // ripple lines (the look's `waves`), 水纹 rows where it asks for them (waveMode 1); not lost in the haze, only faded
+    // by the look's far distance
     if (F.shotDir.z > 0.0) {
-      let rp = ripples(P, footprint, F.shotDir.z, F.shotDir.w, max(abs(dirW.y), 0.01));
-      ink = max(ink, rp * 0.6 * (1.0 - smoothstep(F.lines.y * 0.5, F.lines.y * 1.5, dist)));
+      let sinG = max(abs(dirW.y), 0.004);
+      var wave = 0.0;
+      if (F.shotDir.w > 0.5) { wave = waveRows(P, footprint, sinG, clamp(F.shotDir.z, 0.0, 1.0), 0.45, 9.0) * 0.8; }
+      else { wave = ripples(P, footprint, clamp(F.shotDir.z, 0.0, 1.0), 0.0, sinG); }
+      wave *= 1.0 - smoothstep(F.lines.y * 0.35, F.lines.y * 1.1, dist);
+      ink += wave * 0.6 / max(exp(-dist / (F.look.x * max(s2.w, 1.0))), 0.05);
+      if (u32(F.counts.w + 0.5) == 6u) { return vec4f(wave, F.shotDir.z, F.shotDir.w, 1.0); }
     }
     ink *= 1.0 - min(sunPath * (1.0 + 0.4 * F.accent.z), 1.0);
   }
