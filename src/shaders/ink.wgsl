@@ -245,6 +245,36 @@ fn leafDots(p: vec2f, S: f32, pxu: f32, dens0: f32, seed: i32, elong: f32) -> f3
   return cov;
 }
 
+/** 米点: soft horizontal blobs, the far woods (p: metres on the surface, S: the spacing) */
+fn miDots(p: vec2f, S: f32, dens: f32, seed: i32) -> f32 {
+  var cov = 0.0;
+  let cell = vec2f(S * 1.3, S * 0.7);
+  let gi = floor(p / cell);
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let cc = gi + vec2f(f32(i), f32(j));
+      let h = h4(vec3i(vec2i(cc), seed + 23));
+      let on = markOn(h.x, dens);
+      if (on <= 0.0) { continue; }
+      let v = (p - (cc + h.yz) * cell) / (S * vec2f(0.62, 0.3) * (0.8 + 0.4 * h.w));
+      cov += (1.0 - smoothstep(0.45, 1.0, length(v))) * (0.35 + 0.4 * h.w) * on;
+    }
+  }
+  return min(cov, 1.0);
+}
+/** 米点 on the far land: the lattice in metres, two sizes blended so the dots keep ~9 px on the screen; the face's own
+ *  plane picks the projection (fixed to the ground) */
+fn farWoods(P: vec3f, nW: vec3f, fp: f32, dens: f32) -> f32 {
+  let l = log2(max(fp * 9.0, 0.5));
+  let l0 = floor(l);
+  let t = smoothstep(0.0, 1.0, l - l0);
+  let ax = abs(nW.x) > abs(nW.z);
+  let p = select(vec2f(P.x, P.y), vec2f(P.z, P.y), ax);
+  let a = miDots(p, exp2(l0), dens, i32(l0) * 7);
+  let b = miDots(p, exp2(l0 + 1.0), dens, i32(l0 + 1.0) * 7);
+  return mix(a, b, t);
+}
+
 /** silhouette and fold strength between this pixel and its neighbour n (offset o); the sky lies behind everything */
 fn edgeTo(A: vec4f, nC: vec3f, cls: u32, p: vec2i, o: vec2i, s1: vec4f) -> f32 {
   let An = loadA(p + o);
@@ -495,6 +525,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_GROUND) {
     let far = smoothstep(350.0, 2200.0, dist);
     ink = mix(ink, 0.24 + 0.45 * (1.0 - clamp(nW.y, 0.0, 1.0)) + 0.15 * shade, far);
+    // the far woods on the hills (above the plain and the shore), sparser up the bare ridges and under snow
+    let wk = smoothstep(250.0, 700.0, dist) * smoothstep(6.0, 25.0, P.y) * (1.0 - 0.8 * F.lines.z);
+    if (wk > 0.0) { ink = max(ink, farWoods(P, nW, footprint, 0.55 + 0.3 * shade) * 0.55 * wk); }
     hazeScale *= mix(1.0, 6.0, far);
     // the far hills' ridges drawn
     lineK = mix(1.0, 5.0, far);
