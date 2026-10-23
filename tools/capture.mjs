@@ -7,8 +7,8 @@
 // path.json: { "keys": [ { "t": 0, "at": [x, y, z], "to": [x, y, z], "fov": 42, "look": 2, "fly": false }, … ] }
 // Between two keys the eye and its target ease (smoothstep) from one to the next; a key with "cut": true jumps to it
 // (and the painting settles for --settle s before recording goes on, as a viewpoint change on the site dissolves in).
-// Walking keys ("fly" false) keep the eye on the ground at eye height. The same path drives linan's own capture, so
-// the two can be laid side by side.
+// Walking keys ("fly" false) keep the eye on the ground at eye height where a walker may stand. The same path drives
+// linan's own capture, so the two can be laid side by side.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -67,7 +67,8 @@ try {
       const e = window.__mo.engine;
       if (cut) { e.camera.lookAt(p.at, p.to); e.renderer.cut(); }
       if (p.look !== undefined && p.look !== look) e.setLook(p.look);
-      e.walker.mode = p.fly ? 'fly' : 'walk';
+      // (a walking key over water or where no one may stand, a boat's or a balcony's view, keeps its height)
+      e.walker.mode = p.fly ? 'fly' : e.modeAt(p.at);
       // (a place's field of view widens on a screen narrower than its fitAspect, as linan's does)
       const vp = p.place ? e.scene?.viewpoints?.find((v) => v.id === p.place) : null;
       const fit = vp?.fitAspect ?? 0, asp = e.camera.aspect, fov = p.fov ?? 42;

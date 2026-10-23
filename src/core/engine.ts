@@ -118,8 +118,14 @@ export class Engine {
     this.camera.lookAt(v.position, v.target);
     this.view = v;
     this.fitFov();
-    const g = this.walker.ground(v.position[0], v.position[2]);
-    this.walker.mode = Number.isFinite(g) && v.position[1] - g > 4 ? 'fly' : 'walk';
+    this.walker.mode = this.modeAt(v.position);
+  }
+
+  /** how an eye at `p` moves: walking where it stands near walkable ground, flying over water or high above it */
+  modeAt(p: [number, number, number]): 'walk' | 'fly' {
+    const g = this.walker.ground(p[0], p[2]);
+    if (this.walkable && !this.walkable.free(p[0], p[2])) return 'fly';
+    return Number.isFinite(g) && p[1] - g > 4 ? 'fly' : 'walk';
   }
 
   resize(): void {

@@ -27,19 +27,30 @@ interface SceneJson {
   surfaces?: string;
 }
 
-async function fetchBuffer(url: URL): Promise<ArrayBuffer> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`[mo] ${url}: ${r.status}`);
-  return r.arrayBuffer();
+export interface LoadOptions {
+  /** called as each of the scene's binary files arrives: files done, files in all, bytes so far */
+  onProgress?: (done: number, total: number, bytes: number) => void;
 }
 
 /** a mo-scene directory (docs/SCENE_FORMAT.md) at `base` (ending in /) */
-export async function loadMoScene(base: string | URL): Promise<SceneData> {
+export async function loadMoScene(base: string | URL, opts: LoadOptions = {}): Promise<SceneData> {
   const root = new URL(base, location.href);
   const r = await fetch(new URL('scene.json', root));
   if (!r.ok) throw new Error(`[mo] ${root}scene.json: ${r.status}`);
   const j = (await r.json()) as SceneJson;
   if (j.format !== 'mo-scene' || j.version !== 0) throw new Error(`[mo] not a mo-scene v0: ${j.format} ${j.version}`);
+  const files = (f?: string | string[]) => (f === undefined ? 0 : Array.isArray(f) ? f.length : 1);
+  const fieldFiles = (f?: FieldJson) => (f ? files(f.file) + files(f.classMap?.file) : 0);
+  const total = (j.geometry?.length ?? 1) + (j.instanceFiles?.length || 1) + fieldFiles(j.terrain?.near) + fieldFiles(j.terrain?.far) + (j.textures?.length ?? 0);
+  let done = 0, bytes = 0;
+  const fetchBuffer = async (url: URL): Promise<ArrayBuffer> => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`[mo] ${url}: ${r.status}`);
+    const b = await r.arrayBuffer();
+    bytes += b.byteLength;
+    opts.onProgress?.(++done, total, bytes);
+    return b;
+  };
   // a field's bands (or its one file) joined into one array
   const banded = async <T extends Float32Array | Uint8Array>(files: string | string[], make: (b: ArrayBuffer) => T, n: number, alloc: (n: number) => T): Promise<T> => {
     const list = Array.isArray(files) ? files : [files];

@@ -19,7 +19,8 @@ node tools/capture.mjs --q "scene=…" --path p.json      # a video along a came
 node tools/drawstats.mjs --q "scene=…&vp=2"             # what each pass draws: instances, triangles, heaviest slots
 node tools/pack-scene.mjs <scene> <out>                 # (no browser) repack a scene into files of at most 24 MiB
 node tools/compare/linan-site.mjs --site <linan> --path p.json   # the same path through linan's own renderer
-node tools/compare/stack.mjs left.mp4 right.mp4 out.mp4          # (no browser) two captures side by side
+node tools/compare/stack.mjs left.mp4 right.mp4 out.mp4          # two captures side by side, labelled
+node tools/site.mjs --scene <scene> [--vp 2]           # (no browser) the demo and its scenes as a static site
 ```
 
 In the demo: W A S D walk, Shift run, F walk / fly, mouse (double-click to lock) look, 1 … 9 and 0 the viewpoints,

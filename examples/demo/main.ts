@@ -14,7 +14,14 @@ async function main(): Promise<void> {
   const t0 = performance.now();
   const engine = await Engine.create({ canvas, pixelRatio: Number(P.get('dpr')) || undefined });
   console.log(`[demo] engine in ${(performance.now() - t0).toFixed(0)} ms`);
-  const scene = P.get('scene') ? await loadMoScene(P.get('scene')!) : syntheticTown(Number(P.get('seed')) || 1103, { heightfield: P.get('terrain') === '1' });
+  // a large scene shows how much of it has arrived
+  const load = document.getElementById('load')!;
+  const onProgress = (done: number, total: number, bytes: number) => {
+    load.style.display = 'grid';
+    load.textContent = `${P.get('scene')} · ${done} / ${total} files · ${(bytes / 1048576).toFixed(0)} MB`;
+  };
+  const scene = P.get('scene') ? await loadMoScene(P.get('scene')!, { onProgress }) : syntheticTown(Number(P.get('seed')) || 1103, { heightfield: P.get('terrain') === '1' });
+  load.style.display = 'none';
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
   // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
@@ -68,6 +75,7 @@ main().catch((e) => {
   console.error(e);
   window.__mo = { engine: undefined as unknown as Engine, ready: false, error: String(e?.message ?? e) };
   const err = document.getElementById('err')!;
+  document.getElementById('load')!.style.display = 'none';
   err.style.display = 'grid';
   err.textContent = e instanceof NoWebGPU ? 'This page needs WebGPU (Chrome, Edge, Safari 26 or Firefox on Windows).' : String(e?.message ?? e);
 });

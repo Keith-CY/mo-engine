@@ -5,7 +5,7 @@ export { Clock } from './core/clock';
 export { Walker } from './controls/walker';
 export { NoWebGPU } from './gpu/device';
 export { DEFAULT_STYLE, packStyle, type InkStyle, type ClassStyle, type Look } from './ink/style';
-export { loadMoScene } from './scene/loader';
+export { loadMoScene, type LoadOptions } from './scene/loader';
 export { addTerrain, groundAt } from './terrain/chunks';
 export { syntheticTown } from './scene/synthetic';
 export { CLS, heightAt, writeInstance, INSTANCE_BYTES, type SceneData, type MeshData, type Viewpoint, type Heightfield } from './scene/types';
