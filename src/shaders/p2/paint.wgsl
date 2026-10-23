@@ -433,8 +433,9 @@ fn cloudsAt(dirW: vec3f) -> vec2f {
 }
 
 /** albedo × light of a G-buffer texel (−1: no surface); and the albedo alone (slab joints without the cast shadows) */
-fn gShade(p: vec2i) -> f32 { let A = texA(p); if (A.z <= 0.0) { return -1.0; } let b = texB(p); return b.z * (0.6 * max(b.x, 0.0) + max(b.y, 0.0)); }
-fn gAlb(p: vec2i) -> f32 { let A = texA(p); if (A.z <= 0.0) { return -1.0; } return texB(p).z; }
+// (the sky's B is cleared to zero and every surface has some albedo: one fetch tells them apart)
+fn gShade(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } return b.z * (0.6 * max(b.x, 0.0) + max(b.y, 0.0)); }
+fn gAlb(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } return b.z; }
 fn originOf(ii: u32) -> vec3f { return vec3f(bitcast<f32>(inst[ii * 16u + 9u]), bitcast<f32>(inst[ii * 16u + 10u]), bitcast<f32>(inst[ii * 16u + 11u])); }
 
 @fragment
@@ -442,6 +443,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let fc = v.pos.xy;
   let uv = fc / K.res.xy;
   let gp = vec2i(fc);
+  let bench = u32(K.lv2.w + 0.5);   // (benchmarks: parts left out)
   let uK = K.res.z; let pxA = K.res.w;
   let A = texA(gp); let B = texB(gp); let Cc = textureLoad(gC, gp, 0);
   let cls = clsOf(A);
@@ -565,7 +567,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // fissures; the niche a mid-grey hollow; the carving pale stone modelled only at its turning edges
   var facetLine = 0.0; var facetV = 0.0;
   let nearR = 1.0 - smoothstep(ridgeFrom * 0.3, ridgeFrom * 0.8, D);
-  if ((cls == C_ROCK || cls == C_NICHE) && !night && hasN) {
+  if ((cls == C_ROCK || cls == C_NICHE) && !night && hasN && F_ROCK) {
     let fc2 = facets(P, Nw, fp, 150.0);
     facetV = fc2.x;
     var pv = smoothstep(0.15, 0.85, mix(plB, smoothstep(0.05, 0.65, sunF), 0.3));
@@ -649,7 +651,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (wGeo > 0.0) { w1 = mix(w1, wGeo, farW); }
   // the ground is not blank paper: broad patches of pale wash and dry horizontal 擦 strokes, deeper toward the focus
   // and at the foot of what stands on it (the ground plane's own axes, the look's foreshortening)
-  if ((cls == C_GROUND || cls == C_SMALL) && !night && paperLift < 0.5) {
+  if ((cls == C_GROUND || cls == C_SMALL) && !night && paperLift < 0.5 && (bench & 4u) == 0u && F_GROUND) {
     let gq = vec2f(dot(P.xz, normalize(camR.xz)), dot(P.xz, normalize(camF.xz)));
     let Ds = length(P - F.eye.xyz);
     let sinG = mix(clamp((K.anchor.y - P.y) / max(length(P - K.anchor.xyz), 1.0), 0.03, 1.0), K.axisR.w, K.axisF.w);
@@ -659,13 +661,22 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // over coordinates of thousands of metres: stripes that flicker in motion)
     let ks = log2(sinG * 1.5); let ks0 = floor(ks); let kt = smoothstep(0.0, 1.0, ks - ks0);
     let kA = exp2(ks0); let kB = kA * 2.0;
-    let patchN = mix(lodNoise(vec3f(gq.x, 0.0, gq.y * kA) + 31.0, fps * 260.0 * uK), lodNoise(vec3f(gq.x, 0.0, gq.y * kB) + 31.0, fps * 260.0 * uK), kt);
-    let p2 = smoothstep(0.35, 0.75, mix(lodNoise(vec3f(gq.x, 0.0, gq.y * kA * 1.6667) + 57.0, fps * 90.0 * uK), lodNoise(vec3f(gq.x, 0.0, gq.y * kB * 1.6667) + 57.0, fps * 90.0 * uK), kt));
     let lt = smoothstep(0.0, 1.0, l - l0);
-    let sA = vec2f(gq.x, gq.y * kA); let sB = vec2f(gq.x, gq.y * kB);
-    let stA = mix(streakLevel(sA, vec2f(1.0, 0.0), exp2(l0), 0.16, 1.0, l0), streakLevel(sA, vec2f(1.0, 0.0), exp2(l0 + 1.0), 0.16, 1.0, l0 + 1.0), lt);
-    let stB = mix(streakLevel(sB, vec2f(1.0, 0.0), exp2(l0), 0.16, 1.0, l0), streakLevel(sB, vec2f(1.0, 0.0), exp2(l0 + 1.0), 0.16, 1.0, l0 + 1.0), lt);
-    let st = mix(stA, stB, kt);
+    // (each blend evaluates only the levels it weighs: most pixels lie well inside one)
+    var patchN = 0.0; var p2n = 0.0; var st = 0.0;
+    for (var kk = 0; kk < 2; kk++) {
+      let wk = select(kt, 1.0 - kt, kk == 0);
+      if (wk < 0.01) { continue; }
+      let kf = select(kB, kA, kk == 0);
+      patchN += wk * lodNoise(vec3f(gq.x, 0.0, gq.y * kf) + 31.0, fps * 260.0 * uK);
+      p2n += wk * lodNoise(vec3f(gq.x, 0.0, gq.y * kf * 1.6667) + 57.0, fps * 90.0 * uK);
+      let sq = vec2f(gq.x, gq.y * kf);
+      var stk = 0.0;
+      if (lt < 0.99) { stk += (1.0 - lt) * streakLevel(sq, vec2f(1.0, 0.0), exp2(l0), 0.16, 1.0, l0); }
+      if (lt > 0.01) { stk += lt * streakLevel(sq, vec2f(1.0, 0.0), exp2(l0 + 1.0), 0.16, 1.0, l0 + 1.0); }
+      st += wk * stk;
+    }
+    let p2 = smoothstep(0.35, 0.75, p2n);
     let patches = smoothstep(0.3, 0.8, patchN);
     let nearG = 1.0 - smoothstep(far * 0.25, far * 0.7, Ds);
     let gw = (0.03 + 0.1 * patches + 0.06 * p2 + 0.03 * st * patches + 0.1 * baseK) * mix(0.45, 1.0, idk) * nearG * min(K.look2.y, 2.5);
@@ -863,7 +874,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
 
   // ---------------- 皴 on hills and rock (in shade)
   var cunInk = 0.0;
-  if (isLand(cls) && hasN && D < cunFar) {
+  if (isLand(cls) && hasN && D < cunFar && (bench & 32u) == 0u && F_CUN) {
     let slope = 1.0 - Nw.y;
     var dens = K.st2.z * clamp(select(0.3, 0.05, cls == C_GROUND) + 0.5 * shade + 0.35 * w0, 0.0, 0.95) * idk;
     if (cls == C_GROUND) { dens *= smoothstep(0.15, 0.45, slope); }
@@ -889,7 +900,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
 
   // ---------------- leaf marks by species, 米点 far away
   var leaf = 0.0; var treeTone = 1.0;
-  if (tree) {
+  if (tree && (bench & 8u) == 0u && F_LEAF) {
     let O = Cw;
     let Do = length(Cr);
     let th = h13(vec3i(floor(O * 1.7)) + 91);
@@ -945,7 +956,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   }
   // ---------------- water: blank paper with sparse ripple lines (水纹 rows where the look asks for them)
   var wave = 0.0;
-  if (cls == C_WATER) {
+  if (cls == C_WATER && F_WATER) {
     let sinG = clamp((F.eye.y - P.y) / max(D, 1.0), 0.004, 1.0);
     let sinW = mix(clamp((K.anchor.y - P.y) / max(length(P - K.anchor.xyz), 1.0), 0.004, 1.0), K.axisR.w, K.axisF.w);
     let dens = clamp(K.sh2.z * K.st3.z, 0.0, 1.0);
@@ -959,7 +970,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // ---------------- brush lines (the nearest seed of the jump flood: its strength, width, direction and type)
   var lineInk = 0.0; var bleed = 0.0;
   let J = textureLoad(tJfa, gp, 0);
-  if (J.w != 0u) {
+  if (J.w != 0u && (bench & 1u) == 0u && F_LINES) {
     let sp = vec2i(i32(J.x & 0xffffu), i32(J.x >> 16u));
     let E = textureLoad(tEdge, sp, 0);
     let SA = texA(sp);
@@ -1051,7 +1062,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // dark detail: what the G-buffer has darker than a ring of its neighbours (tile rows, lattices, joints, bark, the
   // leaf clusters), drawn as fine ink — the painters' 細筆 inside the washes
   var detK = 0.0;
-  if ((K.look.x > 0.0 || cls == C_PAVE) && cls != C_SKY && cls != C_WATER && cls != C_WAVE && cls != C_BLOOM && !night) {
+  if ((K.look.x > 0.0 || cls == C_PAVE) && cls != C_SKY && cls != C_WATER && cls != C_WAVE && cls != C_BLOOM && !night && (bench & 2u) == 0u && F_DETAIL) {
     let fineK = isArch(cls) || cls == C_GROUND || cls == C_SMALL || cls == C_PAVE;
     let rr = select(4.0, 2.5, fineK) * uK;
     let c0 = select(gShade(gp), gAlb(gp), gLift);

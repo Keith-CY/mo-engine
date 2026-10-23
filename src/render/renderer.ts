@@ -46,7 +46,7 @@ export class Renderer {
   private readonly frameBuf: GPUBuffer;
   private readonly frameData = new Float32Array(FRAME_FLOATS);
   private styleBuf: GPUBuffer;
-  private pipes!: { cull: GPUComputePipeline; gbuffer: GPURenderPipeline; shadow: GPURenderPipeline; ink: GPURenderPipeline; resolve: GPURenderPipeline; present: GPURenderPipeline; capture: GPURenderPipeline };
+  private pipes!: { cull: GPUComputePipeline; gbuffer: GPURenderPipeline; gbufferOpaque: GPURenderPipeline; shadow: GPURenderPipeline; ink: GPURenderPipeline; resolve: GPURenderPipeline; present: GPURenderPipeline; capture: GPURenderPipeline };
   private shadowMap: GPUTexture;
   private shadowPassBuf: GPUBuffer;
   private shadowFrameBG!: GPUBindGroup;
@@ -89,6 +89,17 @@ export class Renderer {
   lodFadeFrames = 24;
   /** which painter paints: 1 Mo's own (one pass), 2 the still-match painter (linan's, pass for pass: src/render/painter2.ts) */
   painter: 1 | 2 = 1;
+  /** parts of the frame left out (benchmarks only: 'cull', 'shadow', 'gbuffer', 'resolve') */
+  benchSkip = new Set<string>();
+  /** G-buffer work left out (benchmarks only, bits): 1 the surface functions, 2 the cast shadow, 4 the alpha test */
+  benchFlags = 0;
+  /** benchmarks: the G-buffer compiled without discard (foliage drawn whole); rebuildGbuffer() after a change */
+  benchNoDiscard = false;
+  rebuildGbuffer(): void {
+    this.pipes.gbuffer = this.device.createRenderPipeline(this.gbufferDesc(this.surfacesCode));
+    this.pipes.gbufferOpaque = this.device.createRenderPipeline(this.gbufferDesc(this.surfacesCode, true));
+    this.bundles = undefined;
+  }
   readonly p2: Painter2;
 
   constructor(private readonly gpu: Gpu, style: InkStyle) {
@@ -153,9 +164,10 @@ export class Renderer {
       const m = mod(label, code);
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     };
-    const [cull, gbuffer, shadow, ink, resolve, present, capture] = await Promise.all([
+    const [cull, gbuffer, gbufferOpaque, shadow, ink, resolve, present, capture] = await Promise.all([
       d.createComputePipelineAsync({ label: 'mo cull', layout: 'auto', compute: { module: mod('mo cull', CULL), entryPoint: 'main' } }),
       d.createRenderPipelineAsync(gdesc),
+      d.createRenderPipelineAsync(this.gbufferDesc(SURFACES, true)),
       d.createRenderPipelineAsync({
         label: 'mo shadow',
         layout: d.createPipelineLayout({ bindGroupLayouts: [shadowFrame, scene, draw] }),
@@ -172,7 +184,7 @@ export class Renderer {
       fullscreen('mo present', PRESENT, this.gpu.format),
       fullscreen('mo capture', PRESENT, 'rgba8unorm'),
     ]);
-    this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
+    this.pipes = { cull, gbuffer, gbufferOpaque, shadow, ink, resolve, present, capture };
     await this.p2.init();
   }
 
@@ -181,12 +193,16 @@ export class Renderer {
 
   /** the G-buffer pipeline, with a world's surface functions (WGSL) compiled in */
   private surfacesCode = SURFACES;
-  private gbufferDesc(surfaces: string): GPURenderPipelineDescriptor {
+  private gbufferDesc(surfaces: string, opaque = false): GPURenderPipelineDescriptor {
     const d = this.device;
     // (the surface functions may take derivatives inside their branches: anti-aliasing a pattern)
-    const m = d.createShaderModule({ label: 'mo gbuffer', code: 'diagnostic(off, derivative_uniformity);\n' + FRAME + '\n' + GBUFFER + '\n' + TERRAIN + '\n' + surfaces });
+    let code = 'diagnostic(off, derivative_uniformity);\n' + FRAME + '\n' + GBUFFER + '\n' + TERRAIN + '\n' + surfaces;
+    // the opaque variant has no discard at all, so the GPU removes hidden surfaces before shading them (a shader that
+    // may discard keeps every fragment of every draw it shades): the meshes with no alpha mask, not dissolving
+    if (opaque || this.benchNoDiscard) code = code.replace(/\bdiscard;/g, '{}');
+    const m = d.createShaderModule({ label: 'mo gbuffer', code });
     return {
-      label: 'mo gbuffer',
+      label: opaque ? 'mo gbuffer opaque' : 'mo gbuffer',
       layout: d.createPipelineLayout({ bindGroupLayouts: [this.layouts.frame, this.layouts.scene, this.layouts.draw] }),
       vertex: {
         module: m, entryPoint: 'vs',
@@ -232,15 +248,19 @@ export class Renderer {
   private recordBundles(s: GpuScene): { gbuffer: GPURenderBundle; shadow: GPURenderBundle[] } {
     const d = this.device;
     const gb = d.createRenderBundleEncoder({ label: 'mo gbuffer draws', colorFormats: ['rgba16float', 'rgba16float', 'rgba32uint'], depthStencilFormat: 'depth32float' });
-    gb.setPipeline(this.pipes.gbuffer);
     gb.setBindGroup(0, this.frameBG);
     gb.setBindGroup(1, this.sceneBG!);
     gb.setVertexBuffer(0, s.vertices);
     gb.setIndexBuffer(s.indices, 'uint32');
-    for (let i = 0; i < s.slots.length; i++) {
-      gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]);
-      gb.drawIndexedIndirect(s.args, i * 20);
-    }
+    // the opaque meshes first, through the pipeline that cannot discard (hidden surfaces removed before shading); then
+    // the alpha-tested cards and the impostors; then every mesh's instances dissolving between levels (their dither)
+    const S = s.slots.length;
+    const masked = (i: number) => s.slots[i].cutoff > 0 || s.slots[i].billboard > 0;
+    gb.setPipeline(this.pipes.gbufferOpaque);
+    for (let i = 0; i < S; i++) if (!masked(i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
+    gb.setPipeline(this.pipes.gbuffer);
+    for (let i = 0; i < S; i++) if (masked(i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
+    for (let i = 0; i < S; i++) { gb.setBindGroup(2, this.drawBG!, [(S + i) * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, (3 * S + i) * 20); }
     const shadow = CASCADE_RADII.map((_, k) => {
       const e = d.createRenderBundleEncoder({ label: `mo shadow ${k} draws`, colorFormats: [], depthStencilFormat: 'depth32float' });
       e.setPipeline(this.pipes.shadow);
@@ -375,7 +395,7 @@ export class Renderer {
     const d = this.device;
     // a world's own surface functions: the G-buffer pipeline made again with them
     const surf = data.surfaces ?? SURFACES;
-    if (surf !== this.surfacesCode) { this.surfacesCode = surf; this.pipes.gbuffer = d.createRenderPipeline(this.gbufferDesc(surf)); }
+    if (surf !== this.surfacesCode) { this.surfacesCode = surf; this.rebuildGbuffer(); }
     const s = (this.scene = new GpuScene(d, data));
     this.meshNames = data.meshes.map((m) => m.name);
     this.uploadFields(data);
@@ -388,11 +408,12 @@ export class Renderer {
       { binding: 0, resource: { buffer: s.instances } }, { binding: 1, resource: { buffer: s.visible } },
       { binding: 2, resource: { buffer: s.lodState } },
     ] });
-    const draws = new ArrayBuffer(Math.max(1, s.slots.length) * DRAW_STRIDE);
+    // (one entry per slot, then one per slot for its list of instances dissolving between levels: pass 3)
+    const draws = new ArrayBuffer(Math.max(1, s.slots.length) * 2 * DRAW_STRIDE);
     const du = new Uint32Array(draws), df = new Float32Array(draws);
-    s.slots.forEach((sl, i) => {
-      const o = (i * DRAW_STRIDE) / 4;
-      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff; df[o + 6] = sl.lift;
+    for (const fade of [0, 1]) s.slots.forEach((sl, i) => {
+      const o = ((fade * s.slots.length + i) * DRAW_STRIDE) / 4;
+      du[o] = sl.visibleBase + fade * 3 * s.visibleTotal; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff; df[o + 6] = sl.lift; du[o + 7] = sl.billboard;
     });
     this.drawBuf = bufferFrom(d, new Uint8Array(draws), GPUBufferUsage.UNIFORM, 'mo draws');
     this.drawBG = d.createBindGroup({ layout: this.layouts.draw, entries: [{ binding: 0, resource: { buffer: this.drawBuf, size: 32 } }] });
@@ -476,7 +497,7 @@ export class Renderer {
     const rg = L.ranges ?? [0, 0, 0, 0, 0, 0, 0, 0], deg = Math.PI / 180;
     f.set([rg[0] * deg, rg[1] * deg, rg[2] * deg, rg[3], rg[4] * deg, rg[5] * deg, rg[6], rg[7] * deg], 204);
     f.set(L.petals ?? [0, 0, 0, 0], 212);
-    f.set([L.layers ?? 0, L.pool ?? 0, 0, 0], 216);
+    f.set([L.layers ?? 0, L.pool ?? 0, this.benchFlags, 0], 216);
     f.set([...(L.shotPos ?? [0, 0, 0]), L.groundY ?? 0], 220);
     for (let k = 0; k < 3; k++) f.set(L.bands?.[k] ?? [0, 0, 0, 0], 224 + k * 4);
     f.set(L.mist ?? [0, 0, 0, 0], 236);
@@ -539,7 +560,7 @@ export class Renderer {
       names.push(name);
       return { querySet: T.set, beginningOfPassWriteIndex: names.length * 2 - 2, endOfPassWriteIndex: names.length * 2 - 1 };
     };
-    if (s && this.cullBG) {
+    if (s && this.cullBG && !this.benchSkip.has('cull')) {
       enc.copyBufferToBuffer(s.argsTemplate, 0, s.args, 0, s.slots.length * 20 * PASSES);
       const cp = enc.beginComputePass({ label: 'mo cull', timestampWrites: tw('cull') });
       cp.setPipeline(this.pipes.cull);
@@ -547,7 +568,7 @@ export class Renderer {
       cp.dispatchWorkgroups(Math.ceil(s.instanceCount / 64));
       cp.end();
     }
-    for (let k = 0; k < CASCADE_RADII.length; k++) {
+    for (let k = 0; k < (this.benchSkip.has('shadow') ? 0 : CASCADE_RADII.length); k++) {
       const sp = enc.beginRenderPass({
         label: `mo shadow ${k}`, colorAttachments: [], timestampWrites: tw(`shadow${k}`),
         depthStencilAttachment: { view: this.shadowMap.createView({ dimension: '2d', baseArrayLayer: k, arrayLayerCount: 1 }), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
@@ -567,7 +588,7 @@ export class Renderer {
       ],
       depthStencilAttachment: { view: t.depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 0 },
     });
-    if (s && this.sceneBG && this.drawBG) {
+    if (s && this.sceneBG && this.drawBG && !this.benchSkip.has('gbuffer')) {
       this.bundles ??= this.recordBundles(s);
       g.executeBundles([this.bundles.gbuffer]);
     }

@@ -23,6 +23,10 @@ export interface MeshData {
   lift?: number;
   /** the seasons it appears in (absent: all) */
   seasons?: string[];
+  /** a far impostor: a quad (±R across, its height up; uv the card's own coordinates, x −1 … 1 across, y 0 … 1 up)
+   *  turned about the instance's up axis toward the eye, cut to a tree's silhouette: 0 dome, 1 pine, 2 willow,
+   *  3 small round head, 4 ovoid */
+  billboard?: number;
   /** per vertex 4 values for the world's surface functions (x: the surface kind, 0 none) */
   paint?: Float32Array;
   /** bounding sphere in the mesh's own space */

@@ -48,6 +48,14 @@ export class Painter2 {
   anchorDir: [number, number] = [0, 1];
   /** a debug view of the painter (1 wash/detail/mist, 2 tone, 3 density, 4 lines/leaves/皴, 5 ridge, 6 tones) */
   debug = 0;
+  /** stages left out (benchmarks: what each costs; their targets keep what they last held) */
+  skip = new Set<string>();
+  /** parts of the painting left out (benchmarks, bits): 1 lines, 2 dark detail, 4 ground patches, 8 leaf marks, 32 皴 */
+  benchFlags = 0;
+  /** parts of the painting compiled in (benchmarks: reinit() after a change) */
+  features = { ground: true, leaf: true, lines: true, detail: true, cun: true, rock: true, water: true };
+  /** compiles the passes again (after `features` change) */
+  async reinit(): Promise<void> { await this.init(); this.targets = undefined; this.boundTo = undefined; }
 
   constructor(private readonly device: GPUDevice) {
     this.inkBuf = device.createBuffer({ label: 'mo p2 ink', size: INK_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -56,7 +64,8 @@ export class Painter2 {
 
   async init(): Promise<void> {
     const d = this.device;
-    const consts = Object.entries(TONE).map(([k, v]) => `const TONE_${k} = ${Number(v).toFixed(6)};`).join('\n');
+    const consts = Object.entries(TONE).map(([k, v]) => `const TONE_${k} = ${Number(v).toFixed(6)};`).join('\n') + '\n' +
+      Object.entries(this.features).map(([k, v]) => `const F_${k.toUpperCase()} = ${v ? 'true' : 'false'};`).join('\n');
     const mk = (label: string, code: string, format: GPUTextureFormat, common = true) => {
       const m = d.createShaderModule({ label, code: common ? `${FRAME}\n${COMMON}\n${consts}\n${code}` : code });
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
@@ -193,7 +202,7 @@ export class Painter2 {
       rg[4] * deg, rg[5] * deg, rg[6], rg[7] * deg,
       ...S.paperCol, S.age,
       ...S.inkAbs, this.debug,
-      ...lv.slice(0, 4), lv[4], lv[5], lv[6], lv[7], lv[8], lv[9], lv0.length >= 10 ? 1 : 0, 0,
+      ...lv.slice(0, 4), lv[4], lv[5], lv[6], lv[7], lv[8], lv[9], lv0.length >= 10 ? 1 : 0, this.benchFlags,
     ];
     if (vals.length !== INK_FLOATS) throw new Error(`[mo p2] ${vals.length} uniform floats, not ${INK_FLOATS}`);
     f.set(vals);
@@ -218,6 +227,7 @@ export class Painter2 {
       marks.set(s.last, { querySet: w.querySet, endOfPassWriteIndex: w.endOfPassWriteIndex });
     }
     t.passes.forEach((p, i) => {
+      if (this.skip.has(p.stage)) return;
       const rp = enc.beginRenderPass({ label: 'mo ' + p.label, timestampWrites: marks.get(i), colorAttachments: [{ view: p.view, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] });
       rp.setPipeline(p.pipe); rp.setBindGroup(0, p.bg); rp.draw(3); rp.end();
     });

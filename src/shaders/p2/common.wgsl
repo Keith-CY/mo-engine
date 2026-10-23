@@ -62,7 +62,12 @@ fn h43(p: vec3i) -> vec4f {
   let b = pcg3(a ^ vec3u(0x9e3779b9u));
   return vec4f(vec3f(a & vec3u(0xffffffu)), f32(b.x & 0xffffffu)) / 16777215.0;
 }
-fn h13(p: vec3i) -> f32 { return h33(p).x; }
+/** one well-mixed value from an integer lattice point (a cheaper hash than pcg3 for the value noise: 12 operations) */
+fn h13(p: vec3i) -> f32 {
+  var h = (bitcast<u32>(p.x) * 0x8da6b343u) ^ (bitcast<u32>(p.y) * 0xd8163841u) ^ (bitcast<u32>(p.z) * 0xcb1ab31fu);
+  h ^= h >> 16u; h *= 0x7feb352du; h ^= h >> 15u; h *= 0x846ca68bu; h ^= h >> 16u;
+  return f32(h & 0xffffffu) / 16777215.0;
+}
 fn vnoise3(p: vec3f) -> f32 {
   let fi = floor(p); let i = vec3i(fi); var f = p - fi; f = f * f * (3.0 - 2.0 * f);
   let a = h13(i); let b = h13(i + vec3i(1, 0, 0)); let c = h13(i + vec3i(0, 1, 0)); let d = h13(i + vec3i(1, 1, 0));
@@ -72,10 +77,12 @@ fn vnoise3(p: vec3f) -> f32 {
 fn vnoise2(p: vec2f) -> f32 { return vnoise3(vec3f(p, 0.5)); }
 /** world-anchored noise with features ~size metres; size spans octaves smoothly (two power-of-2 levels blended) */
 fn lodNoise(P: vec3f, size: f32) -> f32 {
-  let l = log2(max(size, 1e-3)); let l0 = floor(l); let t = l - l0;
-  let a = vnoise3(P / exp2(l0) + l0 * 7.31);
-  let b = vnoise3(P / exp2(l0 + 1.0) + (l0 + 1.0) * 7.31);
-  return mix(a, b, smoothstep(0.0, 1.0, t));
+  let l = log2(max(size, 1e-3)); let l0 = floor(l); let t = smoothstep(0.0, 1.0, l - l0);
+  // (a level that weighs nothing is not evaluated)
+  var r = 0.0;
+  if (t < 0.995) { r += (1.0 - t) * vnoise3(P / exp2(l0) + l0 * 7.31); }
+  if (t > 0.005) { r += t * vnoise3(P / exp2(l0 + 1.0) + (l0 + 1.0) * 7.31); }
+  return r;
 }
 /** coverage of a tapered segment a → b (widths w0 → w1), aa = soft edge, all in the same units */
 fn segCov(p: vec2f, a: vec2f, b: vec2f, w0: f32, w1: f32, aa: f32) -> f32 {

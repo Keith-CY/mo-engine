@@ -9,6 +9,7 @@ interface MeshJson {
   mask?: { texture: number; cutoff: number; all?: boolean };
   lift?: number;
   seasons?: string[];
+  billboard?: number;
 }
 /** a heightfield in one file, or in bands of `rowsPerFile` rows */
 interface FieldJson { file: string | string[]; rowsPerFile?: number; origin: [number, number]; cell: number; width: number; depth: number; classMap?: { file: string | string[] } }
@@ -106,7 +107,7 @@ export async function loadMoScene(base: string | URL, opts: LoadOptions = {}): P
       patterns: a.pattern && a.uv ? u32(a.pattern, m.vertexCount) : undefined,
       paint: a.paint ? f32(a.paint, m.vertexCount * 4) : undefined,
       mask: m.mask ? { texture: m.mask.texture, cutoff: m.mask.cutoff, all: !!m.mask.all } : undefined,
-      tone: m.tone ?? 0.5, lift: m.lift, seasons: m.seasons,
+      tone: m.tone ?? 0.5, lift: m.lift, seasons: m.seasons, billboard: m.billboard,
       indices: u32(m.index, m.indexCount),
       center: m.bounds.center, radius: m.bounds.radius,
     };

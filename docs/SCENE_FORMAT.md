@@ -121,6 +121,11 @@ A scene may add these; a scene without them is painted from mesh and terrain cla
   none.
 * **`meshes[].seasons`**: `["summer", "autumn"]`, the seasons the mesh appears in (a lotus pond, blossom, autumn
   leaves); absent: every season. A look's `season` chooses.
+* **`meshes[].billboard`**: `0` … `4`, a far impostor: the mesh is a quad (x ±R across, y up; `uv` the card's own
+  coordinates, x −1 … 1, y 0 … 1) that Mo turns about the instance's up axis toward the eye and cuts to a tree's
+  silhouette — 0 dome on a short trunk, 1 pine (flat tiers), 2 willow (head and hanging curtain), 3 small round head,
+  4 ovoid. It is lit as a rounded crown, casts no shadow, and is meant as a plant's last LOD level (two triangles
+  where the crown had hundreds).
 * **`viewpoints[].look`**: the id of the look (`looks`) the viewpoint is painted in.
 * **`viewpoints[].fitAspect`**: `fovY` holds at this aspect and wider; a narrower screen widens it to keep the same
   horizontal field.

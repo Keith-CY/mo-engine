@@ -27,7 +27,7 @@ struct Frame {
   ranges: vec4f,          // far ranges painted on the sky: base elevation, step, ridge amplitude (rad), count
   rangesB: vec4f,         // … azimuth centre, half width (rad, 0: all round), ink, mist fade (rad)
   season: vec4f,          // fallen petals on the ground (amount), their colour (rgb)
-  layering: vec4f,        // wash layers (墨分五色: 0 off), dark rims where a layer ends (水渍), unused, unused
+  layering: vec4f,        // wash layers (墨分五色: 0 off), dark rims where a layer ends (水渍), bench flags, unused
   shotPos: vec4f,         // the look's own viewpoint (xyz) its mist bands are measured from, the ground height there
   bands: array<vec4f, 3>, // 留白: mist lying low at a distance from shotPos: distance, half width, amount, ceiling (m)
   mist: vec4f,            // a band of mist below a height: from y0, full below y1 … (y0, y1, beyond this distance, amount)
@@ -80,7 +80,12 @@ fn pcg3(v0: vec3u) -> vec3u {
   return v;
 }
 
-fn hash3(p: vec3i) -> f32 { return f32(pcg3(bitcast<vec3u>(p)).x) * (1.0 / 4294967296.0); }
+/** one well-mixed value 0 … 1 from an integer lattice point (12 operations: the value noise's corners) */
+fn hash3(p: vec3i) -> f32 {
+  var h = (bitcast<u32>(p.x) * 0x8da6b343u) ^ (bitcast<u32>(p.y) * 0xd8163841u) ^ (bitcast<u32>(p.z) * 0xcb1ab31fu);
+  h ^= h >> 16u; h *= 0x7feb352du; h ^= h >> 15u; h *= 0x846ca68bu; h ^= h >> 16u;
+  return f32(h) * (1.0 / 4294967296.0);
+}
 
 // value noise, 0 … 1, smooth (quintic)
 fn vnoise(p: vec3f) -> f32 {

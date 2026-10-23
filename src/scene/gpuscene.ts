@@ -21,7 +21,8 @@ function half(v: number): number {
   return s | ((e << 10) + ((m + 0x1000) >> 13));
 }
 /** passes the culling fills: the view, then each shadow cascade (src/shaders/frame.wgsl CASCADES) */
-export const PASSES = 3;
+/** the instance lists per slot: 0 the view, 1 + k shadow cascade k, 3 the view's instances dissolving between levels */
+export const PASSES = 4;
 
 export interface Slot {
   mesh: number;
@@ -42,6 +43,8 @@ export interface Slot {
   lift: number;
   /** the seasons it appears in (bit 0 spring … 3 winter) */
   seasons: number;
+  /** a far impostor's silhouette + 1 (0: an ordinary mesh) */
+  billboard: number;
 }
 
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
@@ -126,6 +129,7 @@ export class GpuScene {
             mesh: mi, indexCount: m.indices.length, firstIndex: where[mi].firstIndex, baseVertex: where[mi].baseVertex,
             visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones, cutoff: m.mask?.cutoff ?? 0, lift: m.lift ?? 0,
             seasons: m.seasons ? m.seasons.reduce((b, s) => b | (SEASONS.indexOf(s) >= 0 ? 1 << SEASONS.indexOf(s) : 0), 0) : 15,
+            billboard: m.billboard !== undefined ? m.billboard + 1 : 0,
           });
           visibleTotal += b.count;
           tris += (m.indices.length / 3) * b.count;

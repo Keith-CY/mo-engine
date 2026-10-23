@@ -21,8 +21,8 @@ try {
   await new Promise((r) => setTimeout(r, 4000));
   const st = await page.evaluate(async (top) => window.__mo.engine.renderer.readDrawStats(top), Number(args.top || 15));
   const M = (x) => (x / 1e6).toFixed(2) + ' M';
-  st.passes.forEach((p, k) => console.log(`${['view', 'cascade 0', 'cascade 1'][k] ?? k}: ${p.instances} instances, ${M(p.triangles)} triangles`));
-  for (const h of st.heaviest) console.log(`  ${['view', 'c0', 'c1'][h.pass]}  ${M(h.triangles).padStart(9)}  ${String(h.instances).padStart(6)} × ${h.mesh} (level ${h.level})`);
+  st.passes.forEach((p, k) => console.log(`${['view', 'cascade 0', 'cascade 1', 'view, dissolving'][k] ?? k}: ${p.instances} instances, ${M(p.triangles)} triangles`));
+  for (const h of st.heaviest) console.log(`  ${['view', 'c0', 'c1', 'fade'][h.pass]}  ${M(h.triangles).padStart(9)}  ${String(h.instances).padStart(6)} × ${h.mesh} (level ${h.level})`);
 } finally {
   await browser.cleanup();
   await server.close();

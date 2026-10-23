@@ -11,6 +11,7 @@ struct Draw {
   level: u32,     // the LOD level this draw holds
   cutoff: f32,    // alpha cutoff of its alpha-tested triangles
   lift: f32,      // metres of lift per metre of eye distance (ground covers over the coarse far terrain)
+  billboard: u32, // a far impostor's silhouette + 1 (0: an ordinary mesh)
 };
 
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -63,6 +64,48 @@ fn pathAt(xz: vec2f, y: f32) -> vec3f {
   }
   return out;
 }
+/** a far impostor's silhouette at the card's own (u −1 … 1, v 0 … 1), per tree seed: (inside, the darker rim) — linan's
+ *  BB_SHAPE: 0 dome on a short trunk, 1 pine (flat tiers on a leaning trunk), 2 willow (head and hanging curtain),
+ *  3 small round head, 4 ovoid */
+fn billboardShape(shape: u32, q: vec2f, seed: f32) -> vec2f {
+  let u = q.x; let v = q.y;
+  let n = vnoise(vec3f(u * 3.1, v * 3.4, seed * 37.0));
+  let n2 = vnoise(vec3f(u * 9.0, v * 9.0, seed * 11.0));
+  var a = 0.0; var dark = 0.0;
+  if (shape == 0u) {
+    let d = length(vec2f(u, (v - 0.6) / 0.42));
+    let e = 0.9 + 0.3 * (n - 0.5) + 0.12 * (n2 - 0.5);
+    a = max(step(d, e), step(abs(u), 0.06) * step(v, 0.3));
+    dark = smoothstep(e - 0.25, e, d);
+  } else if (shape == 1u) {
+    let lean = (seed - 0.5) * 0.3 * v;
+    let t1 = length(vec2f(u - lean, (v - 0.86) / 0.12));
+    let t2 = length(vec2f((u - lean - 0.25 * (seed - 0.5)) / 0.8, (v - 0.66) / 0.1));
+    let t3 = length(vec2f((u - lean + 0.3 * (seed - 0.4)) / 0.55, (v - 0.5) / 0.08));
+    let e = 0.92 + 0.35 * (n - 0.5) + 0.15 * (n2 - 0.5);
+    let d = min(t1, min(t2, t3));
+    a = max(step(d, e), step(abs(u - lean), 0.045) * step(v, 0.8));
+    dark = smoothstep(e - 0.3, e, d);
+  } else if (shape == 2u) {
+    let d = length(vec2f(u, (v - 0.68) / 0.36));
+    let hem = 0.12 + 0.18 * vnoise(vec3f(u * 7.0 + seed * 9.0, 0.0, 0.5)) + 0.08 * (1.0 - abs(u));
+    let curtain = step(abs(u), 0.88 + 0.1 * (n - 0.5)) * step(hem, v) * step(v, 0.8);
+    let e = 0.92 + 0.25 * (n - 0.5);
+    a = max(max(step(d, e), curtain * step(0.32, n2 + 0.2)), step(abs(u), 0.07) * step(v, 0.4));
+    dark = smoothstep(0.6, 0.15, v) * 0.6;
+  } else if (shape == 3u) {
+    let d = length(vec2f(u, (v - 0.58) / 0.45));
+    let e = 0.88 + 0.35 * (n - 0.5) + 0.2 * (n2 - 0.5);
+    a = max(step(d, e), step(abs(u), 0.05) * step(v, 0.25));
+    dark = smoothstep(e - 0.25, e, d);
+  } else {
+    let d = length(vec2f(u / 0.78, (v - 0.56) / 0.46));
+    let e = 0.9 + 0.3 * (n - 0.5) + 0.2 * (n2 - 0.5);
+    a = max(step(d, e), step(abs(u), 0.05) * step(v, 0.2));
+    dark = smoothstep(e - 0.25, e, d);
+  }
+  return vec2f(a, dark);
+}
 @group(1) @binding(0) var<storage, read> inst: array<u32>;
 @group(1) @binding(1) var<storage, read> visible: array<u32>;
 @group(1) @binding(2) var<storage, read> lodState: array<u32>;
@@ -113,6 +156,15 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
   var o: VOut;
   // (uniformly scaled instances: the normal goes through the same axes; the scenes keep scale near uniform)
   o.nW = X * n.x + Y * n.y + Z * n.z;
+  if (D.billboard != 0u) {
+    // a far impostor: the card turned about the instance's up toward the eye (where the eye is, not where it looks:
+    // a turn of the head leaves it be), lit as a rounded crown (linan's far LOD: src/vegetation/materials.js BB_VERT)
+    var d2 = F.eye.xz - T.xz;
+    d2 = select(vec2f(0.0, 1.0), normalize(d2), dot(d2, d2) > 1e-8);
+    let right = vec3f(d2.y, 0.0, -d2.x);
+    rel = Y * p.y + right * p.x * length(X) + (T - F.eye.xyz);
+    o.nW = normalize(right * uv.x * 0.85 + vec3f(0.0, 0.25 + 1.1 * (uv.y - 0.62), 0.0) + vec3f(d2.x, 0.0, d2.y) * 0.55);
+  }
   // terrain: the grid lifted onto its field (src/shaders/terrain.wgsl)
   if ((vcls & VC_TERRAIN) != 0u) { let L = liftTerrain(rel, vcls, uv.x, length(X)); rel = L.rel; o.nW = L.nW; }
   rel.y += D.lift * length(rel);
@@ -189,7 +241,14 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let paveBlend = (v.flags >> 1u) & 1u;
   let pattern = (v.flags >> 8u) & 0xffu;
   let kind = v.flags >> 16u;
-  if (alpha == 1u && a < D.cutoff) { discard; }
+  let bench = u32(F.layering.z + 0.5);
+  if (alpha == 1u && a < D.cutoff && (bench & 4u) == 0u) { discard; }
+  var bbDark = 0.0;
+  if (D.billboard != 0u) {
+    let bb = billboardShape(D.billboard - 1u, v.uv, f32(v.seed & 0xffffu) / 65535.0);
+    if (bb.x < 0.5) { discard; }
+    bbDark = bb.y;
+  }
   if (v.fade.y != 0.0) {
     // the dither cell: about a pixel at this distance, fixed to the world
     let cell = max(0.01, v.depth * F.params.x * 1.5);
@@ -263,14 +322,16 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   o.a = vec4f(octEncode(nV), v.depth, f32(cls));
   let ndl = max(dot(nL, F.sun.xyz), 0.0);
   // the cast shadow is taken along the geometric normal's sun side: a face turned away gets none of its own
-  let sh = shadowAt(v.rel, nL);
+  var sh = 1.0;
+  if ((bench & 2u) == 0u) { sh = shadowAt(v.rel, nL); }
   // the albedo: the world's surface functions where it gave the surface a kind, else the measured tone
   var tone = v.tone;
-  if (kind != 0u) {
+  if (kind != 0u && (bench & 1u) == 0u) {
     tone = surfaceTone(Surface(kind, v.uv, v.paint, wp, nW, v.origin, f32(v.seed & 0xffffu) / 65535.0, v.tone / max(v.tmul, 1e-3))) * v.tmul;
   }
   // thin leaves let the sun through (linan's foliage: three's direct light plus a transmission term, weighed against
   // the leaf's own albedo as its G-buffer reads it): a crown against a low sun is lit, not a black mass
+  tone *= 1.0 - 0.55 * bbDark;
   var sunT = ndl * sh;
   if (fol) {
     var tl = 0.3;

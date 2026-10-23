@@ -29,7 +29,8 @@ fn col(i: u32, c: u32) -> vec3f {
   return vec3f(bitcast<f32>(inst[b]), bitcast<f32>(inst[b + 1u]), bitcast<f32>(inst[b + 2u]));
 }
 
-/** appends instance i to the list of every slot of a level, in pass pi (0 the view, 1 + k cascade k) */
+/** appends instance i to the list of every slot of a level, in pass pi (0 the view, 1 + k cascade k, 3 the view's
+ *  dissolving instances) */
 fn emitLevel(B: Batch, level: u32, pi: u32, i: u32) {
   let slots = u32(F.counts.x);
   let passLen = u32(F.counts.y);
@@ -91,6 +92,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let p = F.planes[k];
     if (dot(p.xyz, c) + p.w < -r) { return; }
   }
-  if (lvl < levels) { emitLevel(B, lvl, 0u, i); }
-  if (fading) { emitLevel(B, prev, 0u, i); }
+  // (dissolving instances go to their own lists, drawn through the pipeline that may discard: the dither)
+  if (fading) {
+    if (lvl < levels) { emitLevel(B, lvl, 3u, i); }
+    emitLevel(B, prev, 3u, i);
+  } else if (lvl < levels) { emitLevel(B, lvl, 0u, i); }
 }
