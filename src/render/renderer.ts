@@ -613,7 +613,7 @@ export class Renderer {
     await buf.mapAsync(GPUMapMode.READ);
     const a = new Uint32Array(buf.getMappedRange().slice(0));
     buf.unmap(); buf.destroy();
-    const passes = [], all = [];
+    const passes: { instances: number; triangles: number }[] = [], all: { pass: number; mesh: string; level: number; instances: number; triangles: number }[] = [];
     for (let p = 0; p < PASSES; p++) {
       let inst = 0, tris = 0;
       s.slots.forEach((sl, i) => {
