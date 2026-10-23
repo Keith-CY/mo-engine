@@ -110,7 +110,8 @@ try {
   // (read as the turn left them, then the pose goes back and the live loop resumes)
   const levelsAfter = await page.evaluate(async () => { const e = window.__mo.engine; const l = Array.from(await e.renderer.readLodState()); e.camera.setPose(window.__pose0); e.endCapture(); return l; });
   let changed = 0;
-  for (let i = 0; i < levelsBefore.length; i++) if (levelsBefore[i] !== 0xff && levelsAfter[i] !== levelsBefore[i]) changed++;
+  // (the level is the state word's low byte; the rest is the dissolve's bookkeeping)
+  for (let i = 0; i < levelsBefore.length; i++) if ((levelsBefore[i] & 0xff) !== 0xff && (levelsAfter[i] & 0xff) !== (levelsBefore[i] & 0xff)) changed++;
   report.levelStepsDuringTurn = changed;
   fs.writeFileSync(path.join(OUT, 'turn-mid.pgm'), Buffer.concat([Buffer.from(`P5 ${SW} ${SH} 255\n`), Buffer.from(frames[N >> 1])]));
 
