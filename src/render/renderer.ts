@@ -7,7 +7,7 @@ import type { Camera } from '../core/camera';
 import type { Gpu } from '../gpu/device';
 import { bufferFrom } from '../gpu/device';
 import { packStyle, type InkStyle } from '../ink/style';
-import { GpuScene, VERTEX_FLOATS } from '../scene/gpuscene';
+import { GpuScene, PASSES, VERTEX_FLOATS } from '../scene/gpuscene';
 import type { SceneData } from '../scene/types';
 import FRAME from '../shaders/frame.wgsl';
 import CULL from '../shaders/cull.wgsl';
@@ -15,8 +15,11 @@ import GBUFFER from '../shaders/gbuffer.wgsl';
 import INK from '../shaders/ink.wgsl';
 import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
+import SHADOW from '../shaders/shadow.wgsl';
 
-const FRAME_FLOATS = 140;
+const FRAME_FLOATS = 200;
+/** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
+const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
 /** sub-pixel offsets (px), Halton (2, 3), 16 frames */
 const JITTER = Array.from({ length: 16 }, (_, i) => [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
@@ -39,7 +42,10 @@ export class Renderer {
   private readonly frameBuf: GPUBuffer;
   private readonly frameData = new Float32Array(FRAME_FLOATS);
   private styleBuf: GPUBuffer;
-  private pipes!: { cull: GPUComputePipeline; gbuffer: GPURenderPipeline; ink: GPURenderPipeline; resolve: GPURenderPipeline; present: GPURenderPipeline; capture: GPURenderPipeline };
+  private pipes!: { cull: GPUComputePipeline; gbuffer: GPURenderPipeline; shadow: GPURenderPipeline; ink: GPURenderPipeline; resolve: GPURenderPipeline; present: GPURenderPipeline; capture: GPURenderPipeline };
+  private shadowMap: GPUTexture;
+  private shadowPassBuf: GPUBuffer;
+  private shadowFrameBG!: GPUBindGroup;
   private layouts!: { frame: GPUBindGroupLayout; scene: GPUBindGroupLayout; draw: GPUBindGroupLayout };
   private sampler: GPUSampler;
   private targets?: Targets;
@@ -67,26 +73,48 @@ export class Renderer {
     this.frameBuf = this.device.createBuffer({ label: 'mo frame', size: FRAME_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.styleBuf = bufferFrom(this.device, packStyle(style), GPUBufferUsage.STORAGE, 'mo style');
     this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.shadowMap = this.device.createTexture({ label: 'mo shadow map', size: [SHADOW_SIZE, SHADOW_SIZE, CASCADE_RADII.length], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+    const pass = new Uint32Array(CASCADE_RADII.length * 64);
+    this.shadowPassBuf = bufferFrom(this.device, pass, GPUBufferUsage.UNIFORM, 'mo shadow passes');
   }
 
   /** compiles every pipeline (call once, before the first frame) */
   async init(): Promise<void> {
     const d = this.device;
     const mod = (label: string, code: string) => d.createShaderModule({ label, code: FRAME + '\n' + code });
-    const frame = d.createBindGroupLayout({ label: 'mo frame layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }] });
+    const frame = d.createBindGroupLayout({ label: 'mo frame layout', entries: [
+      { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d-array' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'comparison' } },
+    ] });
+    const shadowFrame = d.createBindGroupLayout({ label: 'mo shadow frame layout', entries: [
+      { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+      { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
+    ] });
     const scene = d.createBindGroupLayout({ label: 'mo scene layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
     ] });
     const draw = d.createBindGroupLayout({ label: 'mo draw layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } }] });
     this.layouts = { frame, scene, draw };
-    this.frameBG = d.createBindGroup({ layout: frame, entries: [{ binding: 0, resource: { buffer: this.frameBuf } }] });
+    this.frameBG = d.createBindGroup({ layout: frame, entries: [
+      { binding: 0, resource: { buffer: this.frameBuf } },
+      { binding: 1, resource: this.shadowMap.createView({ dimension: '2d-array' }) },
+      { binding: 2, resource: d.createSampler({ compare: 'less', magFilter: 'linear', minFilter: 'linear' }) },
+    ] });
+    this.shadowFrameBG = d.createBindGroup({ layout: shadowFrame, entries: [
+      { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: this.shadowPassBuf, size: 16 } },
+    ] });
+    const pass = new Uint32Array(CASCADE_RADII.length * 64);
+    CASCADE_RADII.forEach((_, k) => pass.set([k, 0, 0, 0], k * 64));
+    d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
+    const smod = mod('mo shadow', SHADOW);
     const gmod = mod('mo gbuffer', GBUFFER);
     const fullscreen = (label: string, code: string, format: GPUTextureFormat) => {
       const m = mod(label, code);
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     };
-    const [cull, gbuffer, ink, resolve, present, capture] = await Promise.all([
+    const [cull, gbuffer, shadow, ink, resolve, present, capture] = await Promise.all([
       d.createComputePipelineAsync({ label: 'mo cull', layout: 'auto', compute: { module: mod('mo cull', CULL), entryPoint: 'main' } }),
       d.createRenderPipelineAsync({
         label: 'mo gbuffer',
@@ -104,12 +132,19 @@ export class Renderer {
         primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
       }),
+      d.createRenderPipelineAsync({
+        label: 'mo shadow',
+        layout: d.createPipelineLayout({ bindGroupLayouts: [shadowFrame, scene, draw] }),
+        vertex: { module: smod, entryPoint: 'vs', buffers: [{ arrayStride: VERTEX_FLOATS * 4, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
+      }),
       fullscreen('mo ink', INK, 'rgba16float'),
       fullscreen('mo resolve', RESOLVE, 'rgba16float'),
       fullscreen('mo present', PRESENT, this.gpu.format),
       fullscreen('mo capture', PRESENT, 'rgba8unorm'),
     ]);
-    this.pipes = { cull, gbuffer, ink, resolve, present, capture };
+    this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
   }
 
   setStyle(style: InkStyle): void {
@@ -137,6 +172,9 @@ export class Renderer {
       { binding: 4, resource: { buffer: s.slotBase } }, { binding: 5, resource: { buffer: s.lodState } },
       { binding: 6, resource: { buffer: s.args } }, { binding: 7, resource: { buffer: s.visible } },
     ] });
+    const pass = new Uint32Array(CASCADE_RADII.length * 64);
+    CASCADE_RADII.forEach((_, k) => pass.set([k, (k + 1) * s.visibleTotal, 0, 0], k * 64));
+    d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
     this.frameNo = 0;
     return { slots: s.slots.length, instances: s.instanceCount, triangles: s.triangles };
   }
@@ -204,12 +242,39 @@ export class Renderer {
     f.set([L.hazeDistance, L.skyLight, L.sunLight, L.paperDrift], 128);
     f.set([...L.paperColor, L.paperTexture], 132);
     f.set([...L.inkColor, L.lineStrength], 136);
+    this.writeLight(f, e);
+    f.set([this.scene?.slots.length ?? 0, this.scene?.visibleTotal ?? 0, CASCADE_RADII.length, 0], 196);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];
   }
 
   sun: [number, number, number] = [0.45, 0.42, -0.79];
+
+  /** the sun's light space and each cascade: a box around the eye, snapped to whole texels of the world (so walking
+   *  moves the shadows' texels in whole steps and turning moves nothing) */
+  private writeLight(f: Float32Array, eye: [number, number, number]): void {
+    const b = this.sun;
+    let r = [b[2], 0, -b[0]];                       // (0, 1, 0) × b
+    let l = Math.hypot(r[0], r[1], r[2]);
+    if (l < 1e-4) { r = [1, 0, 0]; l = 1; }
+    r = r.map((x) => x / l);
+    const u = [b[1] * r[2] - b[2] * r[1], b[2] * r[0] - b[0] * r[2], b[0] * r[1] - b[1] * r[0]];
+    f.set([r[0], u[0], b[0], 0, r[1], u[1], b[1], 0, r[2], u[2], b[2], 0, 0, 0, 0, 1], 140);
+    const ex = r[0] * eye[0] + r[1] * eye[1] + r[2] * eye[2], ey = u[0] * eye[0] + u[1] * eye[1] + u[2] * eye[2];
+    const Z = SHADOW_DEPTH;
+    CASCADE_RADII.forEach((R, k) => {
+      const texel = (2 * R) / SHADOW_SIZE;
+      const cx = Math.round(ex / texel) * texel - ex, cy = Math.round(ey / texel) * texel - ey;
+      f.set([
+        r[0] / R, u[0] / R, -b[0] / (2 * Z), 0,
+        r[1] / R, u[1] / R, -b[1] / (2 * Z), 0,
+        r[2] / R, u[2] / R, -b[2] / (2 * Z), 0,
+        -cx / R, -cy / R, 0.5, 1,
+      ], 156 + k * 16);
+      f.set([cx, cy, R, Z], 188 + k * 4);
+    });
+  }
 
   /** draws one frame to the canvas (and to the capture target when `capture`) */
   render(cam: Camera, timeS: number, capture = false): void {
@@ -219,12 +284,30 @@ export class Renderer {
     const enc = d.createCommandEncoder({ label: 'mo frame' });
     const s = this.scene;
     if (s && this.cullBG) {
-      enc.copyBufferToBuffer(s.argsTemplate, 0, s.args, 0, s.slots.length * 20);
+      enc.copyBufferToBuffer(s.argsTemplate, 0, s.args, 0, s.slots.length * 20 * PASSES);
       const cp = enc.beginComputePass({ label: 'mo cull' });
       cp.setPipeline(this.pipes.cull);
       cp.setBindGroup(0, this.cullBG);
       cp.dispatchWorkgroups(Math.ceil(s.instanceCount / 64));
       cp.end();
+    }
+    for (let k = 0; k < CASCADE_RADII.length; k++) {
+      const sp = enc.beginRenderPass({
+        label: `mo shadow ${k}`, colorAttachments: [],
+        depthStencilAttachment: { view: this.shadowMap.createView({ dimension: '2d', baseArrayLayer: k, arrayLayerCount: 1 }), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
+      });
+      if (s && this.sceneBG && this.drawBG) {
+        sp.setPipeline(this.pipes.shadow);
+        sp.setBindGroup(0, this.shadowFrameBG, [k * 256]);
+        sp.setBindGroup(1, this.sceneBG);
+        sp.setVertexBuffer(0, s.vertices);
+        sp.setIndexBuffer(s.indices, 'uint32');
+        for (let i = 0; i < s.slots.length; i++) {
+          sp.setBindGroup(2, this.drawBG, [i * DRAW_STRIDE]);
+          sp.drawIndexedIndirect(s.args, ((k + 1) * s.slots.length + i) * 20);
+        }
+      }
+      sp.end();
     }
     const g = enc.beginRenderPass({
       label: 'mo gbuffer',

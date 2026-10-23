@@ -8,6 +8,8 @@ import { INSTANCE_BYTES, type SceneData } from './types';
 
 /** interleaved vertex: position (3), normal (3), albedo luminance (1) */
 export const VERTEX_FLOATS = 7;
+/** passes the culling fills: the view, then each shadow cascade (src/shaders/frame.wgsl CASCADES) */
+export const PASSES = 3;
 
 export interface Slot {
   mesh: number;
@@ -37,6 +39,8 @@ export class GpuScene {
   readonly slots: Slot[] = [];
   readonly instanceCount: number;
   readonly triangles: number;
+  /** the length of one pass's visible lists */
+  readonly visibleTotal: number;
 
   constructor(device: GPUDevice, scene: SceneData) {
     // the pools
@@ -92,10 +96,12 @@ export class GpuScene {
     this.batches = bufferFrom(device, new Uint8Array(binfo), GPUBufferUsage.STORAGE, 'mo batches');
     this.slotBase = bufferFrom(device, new Uint32Array(this.slots.map((s) => s.visibleBase)), GPUBufferUsage.STORAGE, 'mo slotBase');
     this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xff), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 'mo lodState');
-    const args = new Uint32Array(this.slots.length * 5);
-    this.slots.forEach((s, i) => args.set([s.indexCount, 0, s.firstIndex, s.baseVertex, 0], i * 5));
+    // one set of draws per pass (the view, then each cascade)
+    const args = new Uint32Array(this.slots.length * 5 * PASSES);
+    for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => args.set([s.indexCount, 0, s.firstIndex, s.baseVertex, 0], (p * this.slots.length + i) * 5));
     this.argsTemplate = bufferFrom(device, args, GPUBufferUsage.COPY_SRC, 'mo args template');
     this.args = bufferFrom(device, args, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT, 'mo args');
-    this.visible = device.createBuffer({ label: 'mo visible', size: Math.max(16, visibleTotal * 4), usage: GPUBufferUsage.STORAGE });
+    this.visibleTotal = visibleTotal;
+    this.visible = device.createBuffer({ label: 'mo visible', size: Math.max(16, visibleTotal * 4 * PASSES), usage: GPUBufferUsage.STORAGE });
   }
 }

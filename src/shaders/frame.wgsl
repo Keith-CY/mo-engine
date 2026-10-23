@@ -19,7 +19,13 @@ struct Frame {
   look: vec4f,            // haze distance (m), sky light, sun light, paper drift (m of forward travel per paper turn)
   paper: vec4f,           // paper colour (rgb), paper texture strength
   ink: vec4f,             // ink colour (rgb), line strength
+  lightRot: mat4x4f,      // world → light space (rows: right, up, towards the sun)
+  shadowVP: array<mat4x4f, 2>, // eye-relative world → each shadow cascade's clip space
+  shadowBox: array<vec4f, 2>,  // each cascade in light space, eye-relative: centre (xy), half size, depth half range
+  counts: vec4f,          // slots, visible-list length per pass, cascades, unused
 };
+
+const CASCADES = 2u;
 
 fn octEncode(n: vec3f) -> vec2f {
   let p = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));

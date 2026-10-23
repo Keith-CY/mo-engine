@@ -50,11 +50,27 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   lodState[i] = lvl;
   if (lvl >= levels) { return; }
 
+  let slot = B.info.x + lvl;
+  let slots = u32(F.counts.x);
+  let passLen = u32(F.counts.y);
+
+  // shadow casters: in a cascade's box (light space, around the eye; the view direction plays no part)
+  if ((inst[i * 16u + 15u] & 1u) != 0u) {
+    let lp = (F.lightRot * vec4f(c, 0.0)).xyz;
+    for (var k = 0u; k < CASCADES; k++) {
+      let b = F.shadowBox[k];
+      if (abs(lp.x - b.x) < b.z + r && abs(lp.y - b.y) < b.z + r && abs(lp.z) < b.w + r) {
+        let s = (k + 1u) * slots + slot;
+        let n = atomicAdd(&args[s * 5u + 1u], 1u);
+        visible[(k + 1u) * passLen + slotBase[slot] + n] = i;
+      }
+    }
+  }
+
   for (var k = 0u; k < 5u; k++) {
     let p = F.planes[k];
     if (dot(p.xyz, c) + p.w < -r) { return; }
   }
-  let slot = B.info.x + lvl;
   let n = atomicAdd(&args[slot * 5u + 1u], 1u);
   visible[slotBase[slot] + n] = i;
 }
