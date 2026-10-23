@@ -68,6 +68,18 @@ fn pathAt(xz: vec2f, y: f32) -> vec3f {
 @group(1) @binding(2) var<storage, read> lodState: array<u32>;
 @group(2) @binding(0) var<uniform> D: Draw;
 
+/** a surface point for the world's surface functions (src/shaders/surfaces.wgsl) */
+struct Surface {
+  kind: u32,      // the world's surface kind (paint.x)
+  uv: vec2f,      // the metric surface coordinates
+  paint: vec3f,   // the world's per-vertex paint values (y, z, w)
+  P: vec3f,       // the world point
+  N: vec3f,       // the world normal
+  O: vec3f,       // the object's origin
+  seed: f32,      // the object's seed, 0 … 1
+  tone: f32,      // the measured albedo luminance (the fallback)
+};
+
 struct VOut {
   @builtin(position) pos: vec4f,
   @location(0) nW: vec3f,
@@ -80,9 +92,11 @@ struct VOut {
   // dissolving between levels: how far (0 … 1), and whether this draw is the level coming (1) or going (−1)
   @location(7) @interpolate(flat) fade: vec2f,
   @location(8) uv: vec2f,
-  @location(9) @interpolate(flat) alpha: u32,   // 1: alpha-tested
-  @location(10) @interpolate(flat) paveBlend: u32,
-  @location(11) @interpolate(flat) pattern: u32,
+  // bit 0 alpha-tested, bit 1 terrain paving from the paths, bits 8–15 the surface pattern, 16–31 the world's surface kind
+  @location(9) @interpolate(flat) flags: u32,
+  @location(10) paint: vec3f,
+  @location(11) @interpolate(flat) tmul: f32,
+  @location(12) @interpolate(flat) origin: vec3f,
 };
 
 fn col(i: u32, c: u32) -> vec3f {
@@ -92,7 +106,7 @@ fn col(i: u32, c: u32) -> vec3f {
 
 @vertex
 fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @location(3) uv: vec2f, @location(4) vcls: u32,
-      @builtin(instance_index) ii: u32) -> VOut {
+      @location(5) pw: vec2u, @builtin(instance_index) ii: u32) -> VOut {
   let i = visible[D.visibleBase + ii];
   let X = col(i, 0u); let Y = col(i, 1u); let Z = col(i, 2u); let T = col(i, 3u);
   var rel = X * p.x + Y * p.y + Z * p.z + (T - F.eye.xyz);
@@ -110,14 +124,20 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
   let vc = vcls & 0xffffu;
   o.cls = select(ic, select(vc, D.cls, vc == 0xffffu), ic == 0xffffffffu);
   o.uv = uv;
-  o.alpha = (vcls >> 16u) & 1u;
+  o.flags = ((vcls >> 16u) & 1u) | (((vcls >> 17u) & 1u) << 1u) | ((vcls >> 24u) << 8u);
   // terrain: the class comes from the paving map, sampled per pixel at the world point (the same smooth path edge at
   // every terrain level)
-  o.paveBlend = (vcls >> 17u) & 1u;
-  o.pattern = vcls >> 24u;
+
   o.seed = inst[i * 16u + 13u];
   o.id = i;
   o.tone = select(D.tone, tone, D.hasTone == 1u) * bitcast<f32>(inst[i * 16u + 14u]);
+  // the world's paint values (half floats: y | z, w | kind)
+  let p0 = unpack2x16float(pw.x);
+  let p1 = unpack2x16float(pw.y);
+  o.paint = vec3f(p0.x, p0.y, p1.x);
+  o.flags |= (u32(p1.y + 0.5) & 0xffffu) << 16u;
+  o.tmul = bitcast<f32>(inst[i * 16u + 14u]);
+  o.origin = T;
   let st = lodUnpack(lodState[i]);
   o.fade = vec2f(0.0);
   if (st.prev != 0xffu) {
@@ -165,7 +185,11 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let idet = select(0.0, 1.0 / det, abs(det) > 1e-12);
   let Tu = (dpx * duy.y - dpy * dux.y) * idet;
   let Tv = (dpy * dux.x - dpx * duy.x) * idet;
-  if (v.alpha == 1u && a < D.cutoff) { discard; }
+  let alpha = v.flags & 1u;
+  let paveBlend = (v.flags >> 1u) & 1u;
+  let pattern = (v.flags >> 8u) & 0xffu;
+  let kind = v.flags >> 16u;
+  if (alpha == 1u && a < D.cutoff) { discard; }
   if (v.fade.y != 0.0) {
     // the dither cell: about a pixel at this distance, fixed to the world
     let cell = max(0.01, v.depth * F.params.x * 1.5);
@@ -188,7 +212,7 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let pxV = length(Tv - dir * dot(dir, Tv)) / fp;
   var joint = 0.0;
   var block = -1.0;
-  if (v.paveBlend == 1u) {
+  if (paveBlend == 1u) {
     if (paths[0].x > 0.0) {
       let pa = pathAt(wp.xz, wp.y);
       cls = select(1u, 27u, pa.x > 0.5);
@@ -213,20 +237,20 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
       cls = select(1u, 27u, pave > 0.5);
     }
   }
-  if (v.pattern != 0u && v.pattern != 7u) {
+  if (pattern != 0u && pattern != 7u) {
     // coursed stone, after linan's bridges (src/bridges/material.js): ashlar, wall, curb, vault (courses across the
     // barrel: u and v swapped), slabs, steps, brick
     let sizes = array<vec2f, 9>(vec2f(1.0), vec2f(1.45, 0.62), vec2f(1.0, 0.42), vec2f(1.9, 10.0), vec2f(1.1, 0.52),
                                  vec2f(1.6, 0.62), vec2f(1.3, 10.0), vec2f(1.0), vec2f(0.36, 0.09));
-    let swap = v.pattern == 4u;
+    let swap = pattern == 4u;
     let q = select(v.uv, v.uv.yx, swap);
     let ppu = select(vec2f(pxU, pxV), vec2f(pxV, pxU), swap);
-    let c = courses(q, sizes[min(v.pattern, 8u)]);
+    let c = courses(q, sizes[min(pattern, 8u)]);
     let dpxl = min(c.x * ppu.x, c.y * ppu.y);
     let seen = smoothstep(2.5, 6.0, c.w * ppu.y);
     joint = (1.0 - smoothstep(0.45, 1.25, dpxl)) * seen;
     block = c.z;
-  } else if (v.pattern == 7u) {
+  } else if (pattern == 7u) {
     // the voussoirs of an arch ring: a radial joint at every integer of u
     let g = 0.5 - abs(fract(v.uv.x) - 0.5);
     joint = (1.0 - smoothstep(0.45, 1.25, g * pxU)) * smoothstep(2.5, 6.0, pxU);
@@ -236,7 +260,12 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let ndl = max(dot(nW, F.sun.xyz), 0.0);
   // the cast shadow is taken along the geometric normal's sun side: a face turned away gets none of its own
   let sh = shadowAt(v.rel, nW);
-  o.b = vec4f(ndl * sh, 0.5 + 0.5 * nW.y, v.tone, sh);
+  // the albedo: the world's surface functions where it gave the surface a kind, else the measured tone
+  var tone = v.tone;
+  if (kind != 0u) {
+    tone = surfaceTone(Surface(kind, v.uv, v.paint, wp, nW, v.origin, f32(v.seed & 0xffffu) / 65535.0, v.tone / max(v.tmul, 1e-3))) * v.tmul;
+  }
+  o.b = vec4f(ndl * sh, 0.5 + 0.5 * nW.y, tone, sh);
   o.c = vec4u(v.seed, v.id, bitcast<u32>(joint), bitcast<u32>(block));
   return o;
 }

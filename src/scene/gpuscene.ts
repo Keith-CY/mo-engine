@@ -8,8 +8,18 @@ import { INSTANCE_BYTES, VCLASS_ALPHA, VCLASS_OWN, levelMeshes, type LodLevel, t
 
 /** interleaved vertex (4-byte words): position (3), normal (3), albedo luminance (1), uv (2), class word (1, u32: bits
  *  0–15 the class of its triangles or 0xffff for the mesh's, bit 16 alpha-tested, bit 17 paving from the paths,
- *  bits 24–31 the surface pattern) */
-export const VERTEX_FLOATS = 10;
+ *  bits 24–31 the surface pattern), the world's paint values as half floats (2: y | z, w | x the surface kind) */
+export const VERTEX_FLOATS = 12;
+
+/** a float as an IEEE half (round to nearest), in the low 16 bits */
+const F32 = new Float32Array(1), U32 = new Uint32Array(F32.buffer);
+function half(v: number): number {
+  F32[0] = v;
+  const x = U32[0], s = (x >>> 16) & 0x8000, e = ((x >>> 23) & 0xff) - 127 + 15, m = x & 0x7fffff;
+  if (e <= 0) return s | (e < -10 ? 0 : ((m | 0x800000) >> (1 - e + 13)));
+  if (e >= 31) return s | 0x7c00;
+  return s | ((e << 10) + ((m + 0x1000) >> 13));
+}
 /** passes the culling fills: the view, then each shadow cascade (src/shaders/frame.wgsl CASCADES) */
 export const PASSES = 3;
 
@@ -83,6 +93,9 @@ export class GpuScene {
         stage[o + 6] = m.tones ? m.tones[j] : m.tone;
         stage[o + 7] = m.uvs ? m.uvs[j * 2] : 0; stage[o + 8] = m.uvs ? m.uvs[j * 2 + 1] : 0;
         words[o + 9] = (m.vclass ? m.vclass[j] : VCLASS_OWN | (m.mask?.all ? VCLASS_ALPHA : 0)) | ((m.patterns ? m.patterns[j] & 0xff : 0) << 24);
+        const pa = m.paint;
+        words[o + 10] = pa ? half(pa[j * 4 + 1]) | (half(pa[j * 4 + 2]) << 16) : 0;
+        words[o + 11] = pa ? half(pa[j * 4 + 3]) | (half(pa[j * 4]) << 16) : 0;
       }
       if (n) device.queue.writeBuffer(this.vertices, v * VERTEX_FLOATS * 4, stage, 0, n * VERTEX_FLOATS);
       if (m.indices.length) device.queue.writeBuffer(this.indices, k * 4, m.indices as Uint32Array<ArrayBuffer>);

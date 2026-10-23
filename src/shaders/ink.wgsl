@@ -410,6 +410,14 @@ fn rockStreaks(P: vec3f, nW: vec3f, fp: f32, dens: f32) -> f32 {
   return mix(c.x, c.y, smoothstep(0.0, 1.0, l - l0));
 }
 
+/** the lit albedo a G-buffer texel shows (−1: sky) */
+fn litAlbedo(p: vec2i) -> f32 {
+  let q = clamp(p, vec2i(0), vec2i(F.viewport.xy) - 1);
+  if (textureLoad(gA, q, 0).z <= 0.0) { return -1.0; }
+  let b = textureLoad(gB, q, 0);
+  return clamp(F.look.z * b.x + F.look.y * b.y, 0.05, 1.5) * b.z;
+}
+
 /** silhouette and fold strength between this pixel and its neighbour n (offset o); the sky lies behind everything */
 fn edgeTo(A: vec4f, nC: vec3f, cls: u32, p: vec2i, o: vec2i, s1: vec4f) -> f32 {
   let An = loadA(p + o);
@@ -585,6 +593,22 @@ fn fs(v: VOut) -> @location(0) vec4f {
     leaf *= s2.x * F.gains.z * (0.7 + 0.6 * hs) * (1.0 - smoothstep(1000.0, 2000.0, Do));
   }
 
+  // ---- 墨荷: every lotus leaf one wash of its own depth, a little deeper where it turns from the light; veins (勾筋)
+  // radiating from the leaf's centre (its instance's origin), near leaves only
+  var vein = 0.0;
+  if (cls == 24u) {
+    let ii = Cv.y;
+    let O = vec3f(bitcast<f32>(inst[ii * 16u + 9u]), bitcast<f32>(inst[ii * 16u + 10u]), bitcast<f32>(inst[ii * 16u + 11u]));
+    let hd = hash3(vec3i(i32(Cv.x & 0xffffu), 77, 1));
+    ink = (s0.x + s0.y * shade + s0.w * smoothstep(0.4, 0.95, 1.0 - abs(nW.y))) * (0.7 + 0.6 * hd);
+    let v = P.xz - O.xz;
+    let r = length(v);
+    let a = atan2(v.y, v.x) + hd * 6.28;
+    let dA = abs(fract(a / 6.2831 * 13.0 + 0.5) - 0.5) / 13.0 * 6.2831;
+    vein = (1.0 - smoothstep(footprint * 0.3, footprint * 1.1, r * sin(dA))) * smoothstep(footprint * 4.0, footprint * 10.0, r)
+         * (1.0 - smoothstep(F.lines.x * 0.8, F.lines.x * 2.5, dist)) * 0.55 * smoothstep(0.3, 0.55, zoomNoise(P + vec3f(4.4), footprint, 25.0, vec3f(0.0))) * s2.x;
+  }
+
   // a roof's wash: the look's roof gain
   if (cls == C_ROOF) { ink *= F.gains.y; }
 
@@ -628,22 +652,6 @@ fn fs(v: VOut) -> @location(0) vec4f {
   }
   ink += leaf * 0.95 + rockLine * 0.7 + vein;
 
-  // ---- 墨荷: every lotus leaf one wash of its own depth, a little deeper where it turns from the light; veins (勾筋)
-  // radiating from the leaf's centre (its instance's origin), near leaves only
-  var vein = 0.0;
-  if (cls == 24u) {
-    let ii = Cv.y;
-    let O = vec3f(bitcast<f32>(inst[ii * 16u + 9u]), bitcast<f32>(inst[ii * 16u + 10u]), bitcast<f32>(inst[ii * 16u + 11u]));
-    let hd = hash3(vec3i(i32(Cv.x & 0xffffu), 77, 1));
-    ink = (s0.x + s0.y * shade + s0.w * smoothstep(0.4, 0.95, 1.0 - abs(nW.y))) * (0.7 + 0.6 * hd);
-    let v = P.xz - O.xz;
-    let r = length(v);
-    let a = atan2(v.y, v.x) + hd * 6.28;
-    let dA = abs(fract(a / 6.2831 * 13.0 + 0.5) - 0.5) / 13.0 * 6.2831;
-    vein = (1.0 - smoothstep(footprint * 0.3, footprint * 1.1, r * sin(dA))) * smoothstep(footprint * 4.0, footprint * 10.0, r)
-         * (1.0 - smoothstep(F.lines.x * 0.8, F.lines.x * 2.5, dist)) * 0.55 * smoothstep(0.3, 0.55, zoomNoise(P + vec3f(4.4), footprint, 25.0, vec3f(0.0))) * s2.x;
-  }
-
   // ---- marks on other surfaces: world-anchored, a constant size on the screen, a different pattern per object
   var mark = 0.0;
   if (kind == M_GRAIN) {
@@ -686,6 +694,32 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (!crown && cls != C_WATER) {
     let sweep = zoomNoise(P * vec3f(1.0, 5.0, 1.0) + vec3f(2.3), footprint, 38.0, vec3f(0.0));
     ink *= 0.82 + 0.36 * sweep;
+  }
+
+  // ---- dark detail (細筆 inside the washes, after linan's painter): what is darker than the ring of its neighbours —
+  // battens on a sail, timber framing on plaster, windows, tile rows, joints — drawn as fine ink. Built things and the
+  // ground take the fine detail; trees, lotus and rock only clusters a few pixels across
+  if (cls != C_WATER && cls != C_GLOW && cls != C_BLOOM && F.water.y < 0.5) {
+    let fineK = isArch(cls) || cls == C_GROUND || cls == C_SMALL || cls == C_PAVE;
+    let rr = select(4.0, 2.5, fineK) * F.viewport.x / 1664.0;
+    let c0 = litAlbedo(p);
+    var sm = 0.0; var sn = 0.0;
+    for (var k = 0; k < 6; k++) {
+      let a = f32(k) * 1.0472 + 0.3;
+      let vv = litAlbedo(p + vec2i(round(vec2f(cos(a), sin(a)) * rr)));
+      if (vv >= 0.0) { sm += vv; sn += 1.0; }
+    }
+    if (sn > 0.0 && c0 >= 0.0) {
+      let hp = (sm / sn - c0) / (sm / sn + 0.04) * 0.25;
+      var kk = 0.4;
+      if (cls == C_PAVE) { kk = 0.35; } else if (cls == C_ROOF || cls == 19u) { kk = 0.15; } else if (isArch(cls)) { kk = 1.0; }
+      else if (crown) { kk = 0.12; } else if (cls == 24u) { kk = 0.7; } else if (cls == C_ROCK || cls == 25u) { kk = 0.12 * F.veil.w; }
+      else if (cls == 12u) { kk = 0.2; } else if (cls == C_GROUND) { kk = 1.1; }
+      let lo = select(select(0.015, 0.005, fineK), select(0.06, 0.03, cls == C_GROUND), cls == C_GROUND || cls == C_PAVE);
+      var det = 1.25 * clamp((hp - lo) / select(0.2, 0.16, fineK), 0.0, 0.8) * kk * F.gains.w;
+      det *= 1.0 - smoothstep(F.lines.y * 0.3, F.lines.y, dist);
+      ink += det;
+    }
   }
 
   // ---- joints drawn on the surface (stone courses, voussoirs, slabs), and each block its own tone

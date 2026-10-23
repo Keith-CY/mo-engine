@@ -4,7 +4,7 @@ import type { Batch, Heightfield, MeshData, SceneData } from './types';
 interface AttrRef { offset: number; format: string; file?: number }
 interface MeshJson {
   name: string; class: number; vertexCount: number; indexCount: number;
-  attributes: { position: AttrRef; normal: AttrRef; uv?: AttrRef; tone?: AttrRef; class?: AttrRef; pattern?: AttrRef };
+  attributes: { position: AttrRef; normal: AttrRef; uv?: AttrRef; tone?: AttrRef; class?: AttrRef; pattern?: AttrRef; paint?: AttrRef };
   index: AttrRef; bounds: { center: [number, number, number]; radius: number }; tone?: number;
   mask?: { texture: number; cutoff: number; all?: boolean };
   lift?: number;
@@ -24,6 +24,7 @@ interface SceneJson {
   instanceFiles?: string[];
   looks?: SceneData['looks'];
   walk?: SceneData['walk'];
+  surfaces?: string;
 }
 
 async function fetchBuffer(url: URL): Promise<ArrayBuffer> {
@@ -92,6 +93,7 @@ export async function loadMoScene(base: string | URL): Promise<SceneData> {
       uvs: a.uv ? f32(a.uv, m.vertexCount * 2) : undefined,
       vclass: a.class ? u32(a.class, m.vertexCount) : undefined,
       patterns: a.pattern && a.uv ? u32(a.pattern, m.vertexCount) : undefined,
+      paint: a.paint ? f32(a.paint, m.vertexCount * 4) : undefined,
       mask: m.mask ? { texture: m.mask.texture, cutoff: m.mask.cutoff, all: !!m.mask.all } : undefined,
       tone: m.tone ?? 0.5, lift: m.lift, seasons: m.seasons,
       indices: u32(m.index, m.indexCount),
@@ -104,5 +106,7 @@ export async function loadMoScene(base: string | URL): Promise<SceneData> {
     terrain: near || far ? { near, far, cls: j.terrain?.class ?? 1 } : undefined,
     water: j.water ?? [], textures, paths: j.paths ?? [], sun: j.sun?.direction ?? [0.4, 0.5, -0.77], viewpoints: j.viewpoints ?? [],
     looks: j.looks ?? [], walk: j.walk,
+    // (the world's surface functions, WGSL, compiled into the G-buffer)
+    surfaces: j.surfaces ? await (await fetch(new URL(j.surfaces, root))).text() : undefined,
   };
 }

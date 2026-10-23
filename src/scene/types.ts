@@ -23,6 +23,8 @@ export interface MeshData {
   lift?: number;
   /** the seasons it appears in (absent: all) */
   seasons?: string[];
+  /** per vertex 4 values for the world's surface functions (x: the surface kind, 0 none) */
+  paint?: Float32Array;
   /** bounding sphere in the mesh's own space */
   center: [number, number, number];
   radius: number;
@@ -130,6 +132,8 @@ export interface SceneData {
   viewpoints: Viewpoint[];
   looks?: LookData[];
   walk?: WalkData;
+  /** the world's surface functions (WGSL defining surfaceTone(s: Surface) -> f32), compiled into the G-buffer */
+  surfaces?: string;
 }
 
 export const INSTANCE_BYTES = 64;

@@ -18,6 +18,7 @@ import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 import TERRAIN from '../shaders/terrain.wgsl';
+import SURFACES from '../shaders/surfaces.wgsl';
 
 const FRAME_FLOATS = 292;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
@@ -142,31 +143,14 @@ export class Renderer {
     CASCADE_RADII.forEach((_, k) => pass.set([k, 0, 0, 0], k * 64));
     d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
     const smod = mod('mo shadow', SHADOW + '\n' + TERRAIN);
-    const gmod = mod('mo gbuffer', GBUFFER + '\n' + TERRAIN);
+    const gdesc = this.gbufferDesc(SURFACES);
     const fullscreen = (label: string, code: string, format: GPUTextureFormat) => {
       const m = mod(label, code);
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     };
     const [cull, gbuffer, shadow, ink, resolve, present, capture] = await Promise.all([
       d.createComputePipelineAsync({ label: 'mo cull', layout: 'auto', compute: { module: mod('mo cull', CULL), entryPoint: 'main' } }),
-      d.createRenderPipelineAsync({
-        label: 'mo gbuffer',
-        layout: d.createPipelineLayout({ bindGroupLayouts: [frame, scene, draw] }),
-        vertex: {
-          module: gmod, entryPoint: 'vs',
-          buffers: [{ arrayStride: VERTEX_FLOATS * 4, attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x3' },
-            { shaderLocation: 1, offset: 12, format: 'float32x3' },
-            { shaderLocation: 2, offset: 24, format: 'float32' },
-            { shaderLocation: 3, offset: 28, format: 'float32x2' },
-            { shaderLocation: 4, offset: 36, format: 'uint32' },
-          ] }],
-        },
-        fragment: { module: gmod, entryPoint: 'fs', targets: [{ format: 'rgba16float' }, { format: 'rgba16float' }, { format: 'rgba32uint' }] },
-        // (vegetation and roofs are seen from both sides; the fragment flips the normal of a back face)
-        primitive: { topology: 'triangle-list', cullMode: 'none' },
-        depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
-      }),
+      d.createRenderPipelineAsync(gdesc),
       d.createRenderPipelineAsync({
         label: 'mo shadow',
         layout: d.createPipelineLayout({ bindGroupLayouts: [shadowFrame, scene, draw] }),
@@ -188,6 +172,33 @@ export class Renderer {
 
   /** the season the world is painted in: meshes out of it are not drawn */
   setSeason(season: string): void { this.scene?.setSeason(this.device, season); }
+
+  /** the G-buffer pipeline, with a world's surface functions (WGSL) compiled in */
+  private surfacesCode = SURFACES;
+  private gbufferDesc(surfaces: string): GPURenderPipelineDescriptor {
+    const d = this.device;
+    // (the surface functions may take derivatives inside their branches: anti-aliasing a pattern)
+    const m = d.createShaderModule({ label: 'mo gbuffer', code: 'diagnostic(off, derivative_uniformity);\n' + FRAME + '\n' + GBUFFER + '\n' + TERRAIN + '\n' + surfaces });
+    return {
+      label: 'mo gbuffer',
+      layout: d.createPipelineLayout({ bindGroupLayouts: [this.layouts.frame, this.layouts.scene, this.layouts.draw] }),
+      vertex: {
+        module: m, entryPoint: 'vs',
+        buffers: [{ arrayStride: VERTEX_FLOATS * 4, attributes: [
+          { shaderLocation: 0, offset: 0, format: 'float32x3' },
+          { shaderLocation: 1, offset: 12, format: 'float32x3' },
+          { shaderLocation: 2, offset: 24, format: 'float32' },
+          { shaderLocation: 3, offset: 28, format: 'float32x2' },
+          { shaderLocation: 4, offset: 36, format: 'uint32' },
+          { shaderLocation: 5, offset: 40, format: 'uint32x2' },
+        ] }],
+      },
+      fragment: { module: m, entryPoint: 'fs', targets: [{ format: 'rgba16float' }, { format: 'rgba16float' }, { format: 'rgba32uint' }] },
+      // (vegetation and roofs are seen from both sides; the fragment flips the normal of a back face)
+      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
+    };
+  }
 
   /** the present pass's inputs: the resolved painting, and the G-buffer for the water's reflections */
   private presentBindGroup(pipe: GPURenderPipeline, t: Targets, k: number): GPUBindGroup {
@@ -356,6 +367,9 @@ export class Renderer {
 
   setScene(data: SceneData): FrameStats {
     const d = this.device;
+    // a world's own surface functions: the G-buffer pipeline made again with them
+    const surf = data.surfaces ?? SURFACES;
+    if (surf !== this.surfacesCode) { this.surfacesCode = surf; this.pipes.gbuffer = d.createRenderPipeline(this.gbufferDesc(surf)); }
     const s = (this.scene = new GpuScene(d, data));
     this.meshNames = data.meshes.map((m) => m.name);
     this.uploadFields(data);
