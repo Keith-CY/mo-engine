@@ -138,6 +138,9 @@ A scene the size of a city does not fit one file or one upload:
   level is empty). Every mesh of a group is in the instance's space; the level is chosen from the distance between the
   eye and the group's `bounds` (`{ "center", "radius" }` in the instance's space; default the first non-empty level's
   first mesh's bounds), so all the parts of a building change level together. At most 8 meshes per level, 4 levels.
+* **Heightfields in bands**: a field's `file` may be a list, `"file": ["terrain-near.0.f32", …]` with
+  `"rowsPerFile": n`: each file holds n consecutive rows (the last one the rest), so no file passes 24 MiB; the same for
+  a `classMap.file`.
 * **`looks`**: `[{ "id", "name", "en", "sun": [x, y, z], "season": "spring" | "summer" | "autumn" | "winter",
   "night": false, "snow": 0, "ink": { … } }]`, the times and seasons a world is painted in: the sun (towards it, unit
   length; at night the moon), and the world's own ink settings for that look (`ink`: names the world chooses; Mo's
