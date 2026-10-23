@@ -1,5 +1,6 @@
 // Painter 2, pass 1: the tone — what linan's painter takes from the photographic frame: the luminance of each
-// pixel, albedo × (sun + sky), the far land paling into the haze, the sky and the water bright. Full resolution.
+// pixel, albedo × (sun + sky), the far land paling into the haze, the sky and the water bright. At ½ resolution, each
+// texel the mean of its 2 × 2 G-buffer texels (linan's full-resolution tone halved; nothing reads it whole).
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> K: Ink2;
 @group(0) @binding(2) var gA: texture_2d<f32>;
@@ -36,11 +37,10 @@ fn levels(t: f32) -> f32 {
   return clamp(mix(ys[k], ys[k + 1], f), 0.0, 1.0);
 }
 
-@fragment
-fn fs(v: VOut) -> @location(0) vec4f {
-  let p = vec2i(v.pos.xy);
+/** the tone of one G-buffer texel */
+fn toneAt(p: vec2i) -> f32 {
   let A = textureLoad(gA, p, 0);
-  let uv = v.pos.xy / K.res.xy;
+  let uv = (vec2f(p) + 0.5) / K.res.xy;
   let dirW = relDir(uv);
   if (A.z <= 0.0) {
     // the sky: bright, a little darker overhead; at night the sky is dark and the moon a bright disc
@@ -49,17 +49,28 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let ang = acos(clamp(dot(dirW, F.sun.xyz), -1.0, 1.0));
       t = 0.08 + 0.6 * (1.0 - smoothstep(0.016, 0.02, ang)) + 0.25 * exp(-ang / 0.05);
     }
-    return vec4f(t, 0.0, 0.0, 1.0);
+    return t;
   }
   let B = textureLoad(gB, p, 0);
   let cls = clsOf(A);
   // (?p2dbg=9: the raw tone, before the look's levels)
   var t = rawTone(B, cls);
   if (u32(K.inkAbs.w + 0.5) != 9u) { t = levels(t); }
+  // thin foliage: the photograph's leaves and strands cover a pixel only in part (alpha to coverage over many samples;
+  // the G-buffer's alpha test covers it whole), so the sky and what lies behind show through a willow's veil
+  if (cls == C_WILLOW) { t = mix(t, max(t, TONE_SKY_HORIZON), TONE_VEIL_WILLOW); }
+  else if (cls == C_BLOSSOM) { t = mix(t, max(t, TONE_SKY_HORIZON), TONE_VEIL_BLOSSOM); }
   if (cls == C_WATER) { t = select(TONE_WATER, 0.1, K.sh3.y > 0.5); }
   if (cls == C_GLOW && K.sh3.y > 0.5) { t = 0.9; }
   // aerial perspective: the far land pales toward the haze's tone
-  let D = A.z;
-  t = mix(t, TONE_HAZE, (1.0 - exp(-D / TONE_HAZE_DIST)) * TONE_HAZE_AMT);
-  return vec4f(t, 0.0, 0.0, 1.0);
+  t = mix(t, TONE_HAZE, (1.0 - exp(-A.z / TONE_HAZE_DIST)) * TONE_HAZE_AMT);
+  return t;
+}
+
+@fragment
+fn fs(v: VOut) -> @location(0) vec4f {
+  let size = vec2i(K.res.xy);
+  let q = vec2i(v.pos.xy) * 2;
+  let t = toneAt(min(q, size - 1)) + toneAt(min(q + vec2i(1, 0), size - 1)) + toneAt(min(q + vec2i(0, 1), size - 1)) + toneAt(min(q + vec2i(1, 1), size - 1));
+  return vec4f(t * 0.25, 0.0, 0.0, 1.0);
 }

@@ -11,6 +11,7 @@ const P = new URLSearchParams(location.search);
 async function main(): Promise<void> {
   const canvas = document.getElementById('c') as HTMLCanvasElement;
   const hud = document.getElementById('hud')!;
+  if (P.get('hud') === '0') hud.hidden = true;
   const t0 = performance.now();
   const engine = await Engine.create({ canvas, pixelRatio: Number(P.get('dpr')) || undefined });
   console.log(`[demo] engine in ${(performance.now() - t0).toFixed(0)} ms`);
@@ -24,8 +25,8 @@ async function main(): Promise<void> {
   load.style.display = 'none';
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
-  // ?p2=1: the still-match painter (linan's, pass for pass); ?p2dbg=n its debug views
-  if (P.get('p2') === '1') engine.renderer.painter = 2;
+  // the still-match painter (linan's, pass for pass) unless ?p2=0 asks for Mo's first; ?p2dbg=n its debug views
+  engine.renderer.painter = P.get('p2') === '0' ? 1 : 2;
   if (P.get('p2dbg')) engine.renderer.p2.debug = Number(P.get('p2dbg'));
   // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
   if (P.get('paper') === '0' || P.get('marks') === '0' || P.get('lines') === '0') {

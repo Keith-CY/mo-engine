@@ -1,4 +1,5 @@
-// Painter 2, pass 3: where each pixel sits in its mass (linan's RIDGE_FRAG), full resolution:
+// Painter 2, pass 3: where each pixel sits in its mass (linan's RIDGE_FRAG), at ½ resolution (each texel measured
+// from its 2 × 2 block of the G-buffer, in full-resolution pixels):
 //   r = px (sheet) below the ridge of the range this pixel belongs to (999: none in reach)
 //   g = px (sheet) above the base of the mass (where a nearer form, water or the frame edge cuts it)
 //   b = water only: px (sheet) to the nearest shore / object above or below on screen
@@ -16,14 +17,14 @@ fn vs(@builtin(vertex_index) k: u32) -> VOut {
   return o;
 }
 
-fn at(x: f32, y: f32) -> vec4f { return textureLoad(gA, vec2i(i32(x), i32(y)), 0); }
+fn at(x: f32, y: f32) -> vec4f { return textureLoad(gA, clamp(vec2i(i32(x), i32(y)), vec2i(0), vec2i(K.res.xy) - 1), 0); }
 
 @fragment
 fn fs(v: VOut) -> @location(0) vec4f {
   _ = F.eye;
-  let fc = v.pos.xy;
+  let fc = floor(v.pos.xy) * 2.0 + 1.0;
   let H = K.res.y;
-  let a = textureLoad(gA, vec2i(fc), 0);
+  let a = at(fc.x, fc.y);
   let c = clsOf(a);
   if (c == C_SKY) { return vec4f(999.0); }
   let D = a.z;

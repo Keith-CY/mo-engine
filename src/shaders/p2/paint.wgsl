@@ -7,16 +7,15 @@
 @group(0) @binding(2) var gA: texture_2d<f32>;
 @group(0) @binding(3) var gB: texture_2d<f32>;
 @group(0) @binding(4) var gC: texture_2d<u32>;
-@group(0) @binding(5) var tTone: texture_2d<f32>;
-@group(0) @binding(6) var tBlur: texture_2d<f32>;
-@group(0) @binding(7) var tBroad: texture_2d<f32>;
-@group(0) @binding(8) var tEdge: texture_2d<f32>;
-@group(0) @binding(9) var tJfa: texture_2d<u32>;
-@group(0) @binding(10) var tRidge: texture_2d<f32>;
-@group(0) @binding(11) var tLight: texture_2d<f32>;
-@group(0) @binding(12) var tLightB: texture_2d<f32>;
-@group(0) @binding(13) var samp: sampler;
-@group(0) @binding(14) var<storage, read> inst: array<u32>;
+@group(0) @binding(5) var tBlur: texture_2d<f32>;
+@group(0) @binding(6) var tBroad: texture_2d<f32>;
+@group(0) @binding(7) var tEdge: texture_2d<f32>;
+@group(0) @binding(8) var tJfa: texture_2d<u32>;
+@group(0) @binding(9) var tRidge: texture_2d<f32>;
+@group(0) @binding(10) var tLight: texture_2d<f32>;
+@group(0) @binding(11) var tLightB: texture_2d<f32>;
+@group(0) @binding(12) var samp: sampler;
+@group(0) @binding(13) var<storage, read> inst: array<u32>;
 
 const P_INK = vec3f(0.92, 0.98, 1.06); const P_ZHE = vec3f(0.18, 0.42, 0.85); const P_HUA = vec3f(0.95, 0.55, 0.28);
 const P_TENG = vec3f(0.03, 0.12, 0.95); const P_ZHU = vec3f(0.06, 0.85, 0.80);
@@ -464,14 +463,15 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let Cw = select(vec3f(0.0), originOf(Cc.y), tree || cls == C_LOTUS || cls == C_ROOF);
   let Cr = Cw - F.eye.xyz;
 
-  var RG = textureLoad(tRidge, gp, 0);
+  let rsz = vec2i(textureDimensions(tRidge));
+  var RG = textureLoad(tRidge, min(gp / 2, rsz - 1), 0);
   var rdist = RG.r;
   // the far washes grade from a smoothed ridge (trees along a ridge make the distance jump from column to column)
   if (match_ && rdist < 998.0) {
     var sum = min(rdist, 400.0); var nn = 1.0;
     for (var i = -3; i <= 3; i++) {
       if (i == 0) { continue; }
-      let r2 = textureLoad(tRidge, clamp(gp + vec2i(i32(f32(i) * 4.0 * uK), 0), vec2i(0), vec2i(K.res.xy) - 1), 0).r;
+      let r2 = textureLoad(tRidge, clamp(gp / 2 + vec2i(i32(f32(i) * 2.0 * uK), 0), vec2i(0), rsz - 1), 0).r;
       if (r2 < 998.0) { sum += min(r2, 400.0); nn += 1.0; }
     }
     rdist = sum / nn;
@@ -489,7 +489,13 @@ fn fs(v: VOut) -> @location(0) vec4f {
   paper = mix(paper, vec3f(0.955, 0.95, 0.93) * (0.97 + 0.03 * grain), paperLift * 0.3);
 
   // ---------------- tone → wash
-  var tF = smp(tBlur, uv).r; let tB = smp(tBroad, uv).r; let tS = textureLoad(tTone, gp, 0).r;
+  var tF = smp(tBlur, uv).r; let tB = smp(tBroad, uv).r;
+  // (the full-resolution tone only shows the moon's disc in a night sky)
+  var tS = tF;
+  if (cls == C_SKY && night) {
+    let ang = acos(clamp(dot(dirW, F.sun.xyz), -1.0, 1.0));
+    tS = 0.08 + 0.6 * (1.0 - smoothstep(0.016, 0.02, ang)) + 0.25 * exp(-ang / 0.05);
+  }
   let LL = smp(tLight, uv).rg;
   let sunF = LL.x;
   let plB = smp(tLightB, uv).g;
@@ -870,6 +876,17 @@ fn fs(v: VOut) -> @location(0) vec4f {
     if (cls == C_ROCK || cls == C_NICHE) { cunInk *= K.look2.x * select(1.0, 0.15, match_); }
   }
 
+  // ---------------- grass: upright blades drawn with a dry brush (linan's grass has them from the photograph's own
+  // blades, through the dark detail; Mo's grass is one tone), world-anchored on the plane facing the look
+  if (cls == C_SMALL && hasN && !night) {
+    let gq = vec2f(dot(P, camR), P.y);
+    let gl = log2(fp * 7.0 * uK); let gl0 = floor(gl);
+    let gd = clamp(0.25 + 0.45 * shade, 0.0, 0.8);
+    let blades = mix(streakLevel(gq, normalize(vec2f(0.15, -1.0)), exp2(gl0), gd, 0.0, gl0 + 80.0),
+                     streakLevel(gq, normalize(vec2f(0.15, -1.0)), exp2(gl0 + 1.0), gd, 0.0, gl0 + 81.0), smoothstep(0.0, 1.0, gl - gl0));
+    cunInk = max(cunInk, blades * 0.45 * mix(0.5, 1.0, idk) * (1.0 - smoothstep(far * 0.1, far * 0.4, D)));
+  }
+
   // ---------------- leaf marks by species, 米点 far away
   var leaf = 0.0; var treeTone = 1.0;
   if (tree) {
@@ -1060,7 +1077,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
     detK = det;
   }
   // the slab joints Mo's G-buffer draws on a paved path (linan's come from the photograph's own slabs)
-  if (cls == C_PAVE) { ink = max(ink, bitcast<f32>(Cc.z) * 0.42); }
+  if (cls == C_PAVE) {
+    // (soft and broken: the stills' slab joints are a breath of grey, not a ruled grid)
+    let jb = smoothstep(0.3, 0.7, lodNoise(P + 3.1, fp * 14.0 * uK));
+    ink = max(ink, bitcast<f32>(Cc.z) * 0.13 * (0.4 + 0.6 * jb));
+  }
   // the battered stone walls of the terraces: a pale wash, deeper toward the foot and in a few damp vertical streaks,
   // the courses only hinted
   if (K.look5.z > 0.0 && cls == C_STONE && hasN && abs(Nw.y) < 0.6 && !night) {

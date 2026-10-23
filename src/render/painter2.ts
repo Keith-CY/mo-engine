@@ -23,15 +23,15 @@ export const STYLE_MO = {
   gran: 0.25, line: 1.0, lineW: 0.8, wobble: 1.2, dry: 0.35, cun: 1.0, cunKind: 1, dots: 1.0, moss: 1.0, waves: 1.0,
 };
 /** the photograph's tone, calibrated against linan's own (?inkDebug=tone) */
-export const TONE = { SUN: 2.0, SKY: 2.3, SHOULDER: 0.3, AO: 0.35, GROUND: 0.2, PAVE: 0.25, SKY_HORIZON: 0.86, SKY_ZENITH: 0.78, WATER: 0.7, HAZE: 0.8, HAZE_DIST: 2500, HAZE_AMT: 0.85 };
+export const TONE = { SUN: 2.0, SKY: 2.3, SHOULDER: 0.3, AO: 0.35, GROUND: 0.2, PAVE: 0.25, SKY_HORIZON: 0.86, SKY_ZENITH: 0.78, WATER: 0.45, HAZE: 0.8, HAZE_DIST: 2500, HAZE_AMT: 0.85, VEIL_WILLOW: 0.45, VEIL_BLOSSOM: 0.2 };
 const INK_FLOATS = 36 * 4;
 
 interface P2Targets {
   w: number; h: number;
-  tone: GPUTexture; half: GPUTexture[]; quarter: GPUTexture; eighth: GPUTexture[];
+  half: GPUTexture[]; quarter: GPUTexture; eighth: GPUTexture[];
   light: GPUTexture[]; lightQ: GPUTexture; lightE: GPUTexture[];
   edge: GPUTexture; jfa: GPUTexture[]; ridge: GPUTexture;
-  passes: { label: string; pipe: GPURenderPipeline; bg: GPUBindGroup; view: GPUTextureView }[];
+  passes: { label: string; stage: string; pipe: GPURenderPipeline; bg: GPUBindGroup; view: GPUTextureView }[];
   /** which JFA texture holds the result */
   jfaOut: number;
 }
@@ -73,53 +73,57 @@ export class Painter2 {
   private ensure(w: number, h: number, g: { a: GPUTexture; b: GPUTexture; c: GPUTexture; frame: GPUBuffer; inst: GPUBuffer }, out: GPUTexture): P2Targets {
     const key = this.targets;
     if (key && key.w === w && key.h === h && this.boundTo === g.a && this.boundOut === out && this.boundInst === g.inst) return key;
-    if (key) for (const t of [key.tone, ...key.half, key.quarter, ...key.eighth, ...key.light, key.lightQ, ...key.lightE, key.edge, ...key.jfa, key.ridge]) t.destroy();
+    if (key) for (const t of [...key.half, key.quarter, ...key.eighth, ...key.light, key.lightQ, ...key.lightE, key.edge, ...key.jfa, key.ridge]) t.destroy();
     const d = this.device;
     const tex = (label: string, tw: number, th: number, format: GPUTextureFormat = 'rgba16float') =>
       d.createTexture({ label, size: [Math.max(1, tw), Math.max(1, th)], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
     const W2 = Math.ceil(w / 2), H2 = Math.ceil(h / 2), W4 = Math.ceil(w / 4), H4 = Math.ceil(h / 4), W8 = Math.ceil(w / 8), H8 = Math.ceil(h / 8);
     const t: P2Targets = {
       w, h,
-      tone: tex('mo p2 tone', w, h), half: [tex('mo p2 half 0', W2, H2), tex('mo p2 half 1', W2, H2)], quarter: tex('mo p2 quarter', W4, H4),
+      half: [tex('mo p2 half 0', W2, H2), tex('mo p2 half 1', W2, H2)], quarter: tex('mo p2 quarter', W4, H4),
       eighth: [tex('mo p2 eighth 0', W8, H8), tex('mo p2 eighth 1', W8, H8)],
       light: [tex('mo p2 light 0', W2, H2), tex('mo p2 light 1', W2, H2)], lightQ: tex('mo p2 light q', W4, H4),
       lightE: [tex('mo p2 light e0', W8, H8), tex('mo p2 light e1', W8, H8)],
-      edge: tex('mo p2 edge', w, h), jfa: [tex('mo p2 jfa 0', w, h, 'rgba32uint'), tex('mo p2 jfa 1', w, h, 'rgba32uint')], ridge: tex('mo p2 ridge', w, h),
+      edge: tex('mo p2 edge', w, h), jfa: [tex('mo p2 jfa 0', w, h, 'rgba32uint'), tex('mo p2 jfa 1', w, h, 'rgba32uint')], ridge: tex('mo p2 ridge', W2, H2),
       passes: [], jfaOut: 0,
     };
     const P = this.pipes;
     const ub = (v: number[]) => { const b = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); d.queue.writeBuffer(b, 0, new Float32Array(v)); return b; };
     const bg = (pipe: GPURenderPipeline, res: GPUBindingResource[]) => d.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: res.map((resource, binding) => ({ binding, resource })) });
     const fi: GPUBindingResource[] = [{ buffer: g.frame }, { buffer: this.inkBuf }];
-    const pass = (label: string, pipe: GPURenderPipeline, res: GPUBindingResource[], target: GPUTexture) => t.passes.push({ label, pipe, bg: bg(pipe, res), view: target.createView() });
+    let stage = 'tone';
+    const pass = (label: string, pipe: GPURenderPipeline, res: GPUBindingResource[], target: GPUTexture) => t.passes.push({ label, stage, pipe, bg: bg(pipe, res), view: target.createView() });
     // halve src (texel size of src) into dst; blur a ↔ b (k: the step in dst texels)
     const halve = (src: GPUTexture, dst: GPUTexture) => pass('p2 halve', P.blur, [{ buffer: ub([1 / src.width, 1 / src.height, 0, 0]) }, src.createView(), this.sampler], dst);
     const blur = (a: GPUTexture, b: GPUTexture, k: number) => {
       pass('p2 blur', P.blur, [{ buffer: ub([k / a.width, 0, 1, 0]) }, a.createView(), this.sampler], b);
       pass('p2 blur', P.blur, [{ buffer: ub([0, k / a.height, 1, 0]) }, b.createView(), this.sampler], a);
     };
-    // the tone and its blurs: ½ res (≈3 px) and ⅛ res (≈16 px)
-    pass('p2 tone', P.tone, [...fi, g.a.createView(), g.b.createView()], t.tone);
-    halve(t.tone, t.half[0]);
+    // the tone (made at ½ res) and its blurs: ½ res (≈3 px) and ⅛ res (≈16 px)
+    pass('p2 tone', P.tone, [...fi, g.a.createView(), g.b.createView()], t.half[0]);
     blur(t.half[0], t.half[1], 1.0);
     halve(t.half[0], t.quarter);
     halve(t.quarter, t.eighth[0]);
     blur(t.eighth[0], t.eighth[1], 1.0);
     blur(t.eighth[0], t.eighth[1], 1.5);
     // edges and the jump flood (a seed carries its half width)
+    stage = 'lines';
     pass('p2 edge', P.edge, [...fi, g.a.createView(), g.b.createView()], t.edge);
     const zero = d.createTexture({ size: [1, 1], format: 'rgba32uint', usage: GPUTextureUsage.TEXTURE_BINDING });
     this.zero?.destroy(); this.zero = zero;
     pass('p2 jfa', P.jfa, [{ buffer: ub([0, 0, 0, 0]) }, t.edge.createView(), zero.createView()], t.jfa[0]);
     let src = 0;
-    for (const s of [32, 16, 8, 4, 2, 1, 1]) {
+    // (the lines are a few px wide and their bleed a few more: a reach of 15 px is plenty)
+    for (const s of [8, 4, 2, 1]) {
       pass('p2 jfa', P.jfa, [{ buffer: ub([s, 0, 0, 0]) }, t.edge.createView(), t.jfa[src].createView()], t.jfa[1 - src]);
       src = 1 - src;
     }
     t.jfaOut = src;
     // where each pixel sits in its mass
+    stage = 'ridge';
     pass('p2 ridge', P.ridge, [...fi, g.a.createView()], t.ridge);
     // the light on the form (½ res, blurred twice; ⅛ broad)
+    stage = 'light';
     pass('p2 light', P.light, [...fi, g.a.createView(), g.b.createView()], t.light[0]);
     blur(t.light[0], t.light[1], 1.0);
     blur(t.light[0], t.light[1], 1.6);
@@ -128,7 +132,8 @@ export class Painter2 {
     blur(t.lightE[0], t.lightE[1], 1.0);
     blur(t.lightE[0], t.lightE[1], 1.5);
     // the painting
-    pass('p2 paint', P.paint, [...fi, g.a.createView(), g.b.createView(), g.c.createView(), t.tone.createView(), t.half[0].createView(), t.eighth[0].createView(),
+    stage = 'paint';
+    pass('p2 paint', P.paint, [...fi, g.a.createView(), g.b.createView(), g.c.createView(), t.half[0].createView(), t.eighth[0].createView(),
       t.edge.createView(), t.jfa[t.jfaOut].createView(), t.ridge.createView(), t.light[0].createView(), t.lightE[0].createView(), this.sampler, { buffer: g.inst }], out);
     this.targets = t;
     this.boundTo = g.a; this.boundOut = out; this.boundInst = g.inst;
@@ -201,10 +206,20 @@ export class Painter2 {
     tw?: (name: string) => GPURenderPassTimestampWrites | undefined): void {
     const t = this.ensure(cam.w, cam.h, g, out);
     this.write(cam.w, cam.h, cam.pxAngle, cam.eye, cam.viewProj, cam.night);
-    for (const p of t.passes) {
-      const timed = p.label === 'p2 paint' || p.label === 'p2 tone' || p.label === 'p2 ridge' || p.label === 'p2 edge';
-      const rp = enc.beginRenderPass({ label: 'mo ' + p.label, timestampWrites: timed ? tw?.(p.label.slice(3)) : undefined, colorAttachments: [{ view: p.view, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] });
-      rp.setPipeline(p.pipe); rp.setBindGroup(0, p.bg); rp.draw(3); rp.end();
+    // (timed by stage: the first pass of a stage writes its start, the last its end)
+    const stages: Record<string, { first: number; last: number }> = {};
+    t.passes.forEach((p, i) => { const s = (stages[p.stage] ??= { first: i, last: i }); s.last = i; });
+    const marks = new Map<number, GPURenderPassTimestampWrites>();
+    for (const [name, s] of Object.entries(stages)) {
+      const w = tw?.(name);
+      if (!w) continue;
+      if (s.first === s.last) { marks.set(s.first, w); continue; }
+      marks.set(s.first, { querySet: w.querySet, beginningOfPassWriteIndex: w.beginningOfPassWriteIndex });
+      marks.set(s.last, { querySet: w.querySet, endOfPassWriteIndex: w.endOfPassWriteIndex });
     }
+    t.passes.forEach((p, i) => {
+      const rp = enc.beginRenderPass({ label: 'mo ' + p.label, timestampWrites: marks.get(i), colorAttachments: [{ view: p.view, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] });
+      rp.setPipeline(p.pipe); rp.setBindGroup(0, p.bg); rp.draw(3); rp.end();
+    });
   }
 }

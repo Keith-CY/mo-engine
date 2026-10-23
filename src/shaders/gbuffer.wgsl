@@ -197,10 +197,14 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
     if ((v.fade.y > 0.0 && hsh > v.fade.x) || (v.fade.y < 0.0 && hsh <= v.fade.x)) { discard; }
   }
   var nW = normalize(v.nW);
-  if (!front) { nW = -nW; }
+  var cls = v.cls;
+  // foliage keeps its bent "crown" normals on both faces of a card (linan's foliage: a card's back is not the crown's
+  // inside), biased upward as linan lights it: leaves facing down still see the sky through the gaps of the crown
+  let fol = cls == 8u || cls == 9u || cls == 10u || cls == 15u || cls == 16u || cls == 18u || cls == 23u || cls == 26u;
+  if (!front && !fol) { nW = -nW; }
+  let nL = select(nW, normalize(nW + vec3f(0.0, 0.3, 0.0)), fol);
   let nV = normalize((F.viewRot * vec4f(nW, 0.0)).xyz);
   var o: GOut;
-  var cls = v.cls;
   // the joints drawn on the surface: about a pixel wide; they give way where the courses get smaller than a few pixels.
   // Sizes on the screen are taken from the distance and the angle at which the surface is seen (fp: metres per pixel
   // face-on; a unit of u across the line of sight covers |Tu − dir (dir · Tu)| / fp pixels), so they hold still
@@ -257,15 +261,27 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
     block = hash3(vec3i(i32(floor(v.uv.x)), 31, 3));
   }
   o.a = vec4f(octEncode(nV), v.depth, f32(cls));
-  let ndl = max(dot(nW, F.sun.xyz), 0.0);
+  let ndl = max(dot(nL, F.sun.xyz), 0.0);
   // the cast shadow is taken along the geometric normal's sun side: a face turned away gets none of its own
-  let sh = shadowAt(v.rel, nW);
+  let sh = shadowAt(v.rel, nL);
   // the albedo: the world's surface functions where it gave the surface a kind, else the measured tone
   var tone = v.tone;
   if (kind != 0u) {
     tone = surfaceTone(Surface(kind, v.uv, v.paint, wp, nW, v.origin, f32(v.seed & 0xffffu) / 65535.0, v.tone / max(v.tmul, 1e-3))) * v.tmul;
   }
-  o.b = vec4f(ndl * sh, 0.5 + 0.5 * nW.y, tone, sh);
+  // thin leaves let the sun through (linan's foliage: three's direct light plus a transmission term, weighed against
+  // the leaf's own albedo as its G-buffer reads it): a crown against a low sun is lit, not a black mass
+  var sunT = ndl * sh;
+  if (fol) {
+    var tl = 0.3;
+    if (cls == 8u) { tl = 0.18; } else if (cls == 16u) { tl = 0.36; } else if (cls == 18u) { tl = 0.09; }
+    else if (cls == 23u) { tl = 0.49; } else if (cls == 15u) { tl = 0.3; } else if (cls == 26u) { tl = 0.23; }
+    let back = max(-dot(nL, F.sun.xyz), 0.0);
+    let fwd = pow(max(dot(dir, F.sun.xyz), 0.0), 6.0);
+    let wrap = clamp(dot(nL, F.sun.xyz) * 0.5 + 0.5, 0.0, 1.0);
+    sunT = min(sunT + sh * tl / max(tone, 0.03) * (back * (0.5 + 1.5 * fwd) + 0.08 * wrap + 0.35 * fwd), 1.5);
+  }
+  o.b = vec4f(sunT, 0.5 + 0.5 * nL.y, tone, sh);
   o.c = vec4u(v.seed, v.id, bitcast<u32>(joint), bitcast<u32>(block));
   return o;
 }
