@@ -73,6 +73,7 @@ export class Engine {
     if (!L || !this.scene) return;
     this.look = L;
     this.renderer.sun = L.sun;
+    this.renderer.setSeason(L.season ?? 'spring');
     const base = this.baseStyle ??= structuredClone(this.renderer.style);
     const st = structuredClone(base);
     const r = L.ink?.ranges;

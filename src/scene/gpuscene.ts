@@ -30,7 +30,11 @@ export interface Slot {
   cutoff: number;
   /** metres of lift per metre of eye distance */
   lift: number;
+  /** the seasons it appears in (bit 0 spring … 3 winter) */
+  seasons: number;
 }
+
+export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 
 export class GpuScene {
   readonly vertices: GPUBuffer;
@@ -44,6 +48,15 @@ export class GpuScene {
   readonly args: GPUBuffer;
   readonly argsTemplate: GPUBuffer;
   readonly visible: GPUBuffer;
+  private readonly argsData: Uint32Array<ArrayBuffer>;
+
+  /** a season: the draws of the meshes out of it get no triangles (they cost nothing) */
+  setSeason(device: GPUDevice, season: string): void {
+    const bit = 1 << Math.max(0, SEASONS.indexOf(season));
+    const a = this.argsData;
+    for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => { a[(p * this.slots.length + i) * 5] = s.seasons & bit ? s.indexCount : 0; });
+    device.queue.writeBuffer(this.argsTemplate, 0, a);
+  }
   readonly slots: Slot[] = [];
   readonly instanceCount: number;
   readonly triangles: number;
@@ -99,6 +112,7 @@ export class GpuScene {
           this.slots.push({ level: li,
             mesh: mi, indexCount: m.indices.length, firstIndex: where[mi].firstIndex, baseVertex: where[mi].baseVertex,
             visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones, cutoff: m.mask?.cutoff ?? 0, lift: m.lift ?? 0,
+            seasons: m.seasons ? m.seasons.reduce((b, s) => b | (SEASONS.indexOf(s) >= 0 ? 1 << SEASONS.indexOf(s) : 0), 0) : 15,
           });
           visibleTotal += b.count;
           tris += (m.indices.length / 3) * b.count;
@@ -125,6 +139,7 @@ export class GpuScene {
     const args = new Uint32Array(this.slots.length * 5 * PASSES);
     for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => args.set([s.indexCount, 0, s.firstIndex, s.baseVertex, 0], (p * this.slots.length + i) * 5));
     this.argsTemplate = bufferFrom(device, args, GPUBufferUsage.COPY_SRC, 'mo args template');
+    this.argsData = args;
     this.args = bufferFrom(device, args, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC, 'mo args');
     this.visibleTotal = visibleTotal;
     this.visible = device.createBuffer({ label: 'mo visible', size: Math.max(16, visibleTotal * 4 * PASSES), usage: GPUBufferUsage.STORAGE });

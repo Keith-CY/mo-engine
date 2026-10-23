@@ -21,6 +21,8 @@ export interface MeshData {
   /** lifted toward the sky by this many metres per metre of eye distance (ground covers the coarse far terrain would
    *  swallow) */
   lift?: number;
+  /** the seasons it appears in (absent: all) */
+  seasons?: string[];
   /** bounding sphere in the mesh's own space */
   center: [number, number, number];
   radius: number;

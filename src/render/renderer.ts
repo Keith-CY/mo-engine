@@ -186,6 +186,9 @@ export class Renderer {
     this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
   }
 
+  /** the season the world is painted in: meshes out of it are not drawn */
+  setSeason(season: string): void { this.scene?.setSeason(this.device, season); }
+
   /** the present pass's inputs: the resolved painting, and the G-buffer for the water's reflections */
   private presentBindGroup(pipe: GPURenderPipeline, t: Targets, k: number): GPUBindGroup {
     return this.device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [

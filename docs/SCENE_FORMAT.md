@@ -119,6 +119,8 @@ A scene may add these; a scene without them is painted from mesh and terrain cla
   4 vault (courses across a barrel: uv = arc, across m), 5 slabs (uv = across, along m; 1.6 × 0.62), 6 steps (1.3 m
   stones), 7 voussoirs (uv.x an index coordinate: a joint at every integer; uv.y radial m), 8 brick (0.36 × 0.09); 0
   none.
+* **`meshes[].seasons`**: `["summer", "autumn"]`, the seasons the mesh appears in (a lotus pond, blossom, autumn
+  leaves); absent: every season. A look's `season` chooses.
 * **`viewpoints[].look`**: the id of the look (`looks`) the viewpoint is painted in.
 * **`viewpoints[].fitAspect`**: `fovY` holds at this aspect and wider; a narrower screen widens it to keep the same
   horizontal field.
