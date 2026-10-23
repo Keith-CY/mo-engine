@@ -32,7 +32,8 @@ async function main(): Promise<void> {
     const mean = ft.reduce((a, b) => a + b, 0) / Math.max(1, ft.length);
     const p = e.camera.position;
     hud.textContent = `${scene.name} · ${stats.instances} instances · ${(stats.triangles / 1e6).toFixed(1)} M tris (all at level 0+)\n` +
-      `${(1000 / mean).toFixed(0)} fps · ${e.walker.mode} · ${p.map((x) => x.toFixed(0)).join(' ')}`;
+      `${(1000 / mean).toFixed(0)} fps · ${e.walker.mode} · ${p.map((x) => x.toFixed(0)).join(' ')}\n` +
+      `GPU ms ${Object.entries(e.renderer.gpuTimes).map(([k, v]) => `${k} ${v}`).join(' · ')}`;
   });
   engine.start();
   window.__mo = { engine, ready: true };

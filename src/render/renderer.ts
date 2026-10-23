@@ -63,6 +63,9 @@ export class Renderer {
   private prevPose = '';
   private restFrames = 0;
   style: InkStyle;
+  /** GPU time per pass (ms), measured every 30th frame where the GPU has timestamp queries */
+  gpuTimes: Record<string, number> = {};
+  private timer?: { set: GPUQuerySet; resolve: GPUBuffer; read: GPUBuffer; busy: boolean };
   /** LOD distance scale (> 1: coarser sooner) and hysteresis */
   lodScale = 1;
   lodHysteresis = 0.08;
@@ -76,6 +79,14 @@ export class Renderer {
     this.shadowMap = this.device.createTexture({ label: 'mo shadow map', size: [SHADOW_SIZE, SHADOW_SIZE, CASCADE_RADII.length], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
     const pass = new Uint32Array(CASCADE_RADII.length * 64);
     this.shadowPassBuf = bufferFrom(this.device, pass, GPUBufferUsage.UNIFORM, 'mo shadow passes');
+    if (gpu.timestamps) {
+      this.timer = {
+        set: this.device.createQuerySet({ type: 'timestamp', count: 32 }),
+        resolve: this.device.createBuffer({ size: 32 * 8, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
+        read: this.device.createBuffer({ size: 32 * 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }),
+        busy: false,
+      };
+    }
   }
 
   /** compiles every pipeline (call once, before the first frame) */
@@ -283,9 +294,16 @@ export class Renderer {
     this.writeFrame(cam, timeS);
     const enc = d.createCommandEncoder({ label: 'mo frame' });
     const s = this.scene;
+    const T = this.timer && !this.timer.busy && this.frameNo % 30 === 0 ? this.timer : undefined;
+    const names: string[] = [];
+    const tw = (name: string): GPUComputePassTimestampWrites | undefined => {
+      if (!T) return undefined;
+      names.push(name);
+      return { querySet: T.set, beginningOfPassWriteIndex: names.length * 2 - 2, endOfPassWriteIndex: names.length * 2 - 1 };
+    };
     if (s && this.cullBG) {
       enc.copyBufferToBuffer(s.argsTemplate, 0, s.args, 0, s.slots.length * 20 * PASSES);
-      const cp = enc.beginComputePass({ label: 'mo cull' });
+      const cp = enc.beginComputePass({ label: 'mo cull', timestampWrites: tw('cull') });
       cp.setPipeline(this.pipes.cull);
       cp.setBindGroup(0, this.cullBG);
       cp.dispatchWorkgroups(Math.ceil(s.instanceCount / 64));
@@ -293,7 +311,7 @@ export class Renderer {
     }
     for (let k = 0; k < CASCADE_RADII.length; k++) {
       const sp = enc.beginRenderPass({
-        label: `mo shadow ${k}`, colorAttachments: [],
+        label: `mo shadow ${k}`, colorAttachments: [], timestampWrites: tw(`shadow${k}`),
         depthStencilAttachment: { view: this.shadowMap.createView({ dimension: '2d', baseArrayLayer: k, arrayLayerCount: 1 }), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
       });
       if (s && this.sceneBG && this.drawBG) {
@@ -310,7 +328,7 @@ export class Renderer {
       sp.end();
     }
     const g = enc.beginRenderPass({
-      label: 'mo gbuffer',
+      label: 'mo gbuffer', timestampWrites: tw('gbuffer'),
       colorAttachments: [
         { view: t.a.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] },
         { view: t.b.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] },
@@ -331,7 +349,7 @@ export class Renderer {
     }
     g.end();
     const pass = (label: string, view: GPUTextureView, pipe: GPURenderPipeline, bg: GPUBindGroup) => {
-      const p = enc.beginRenderPass({ label, colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }] });
+      const p = enc.beginRenderPass({ label, timestampWrites: tw(label.slice(3)), colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }] });
       p.setPipeline(pipe); p.setBindGroup(0, bg); p.draw(3); p.end();
     };
     const B = this.passBGs!;
@@ -340,7 +358,24 @@ export class Renderer {
     pass('mo resolve', t.hist[k].createView(), this.pipes.resolve, B.resolve[k]);
     pass('mo present', this.gpu.context.getCurrentTexture().createView(), this.pipes.present, B.present[k]);
     if (capture) pass('mo capture', t.display.createView(), this.pipes.capture, B.capture[k]);
+    if (T && names.length) {
+      enc.resolveQuerySet(T.set, 0, names.length * 2, T.resolve, 0);
+      enc.copyBufferToBuffer(T.resolve, 0, T.read, 0, names.length * 16);
+    }
     d.queue.submit([enc.finish()]);
+    if (T && names.length) {
+      T.busy = true;
+      T.read.mapAsync(GPUMapMode.READ).then(() => {
+        const q = new BigUint64Array(T.read.getMappedRange(0, names.length * 16));
+        const out: Record<string, number> = {};
+        let total = 0;
+        names.forEach((n, i) => { const ms = Number(q[i * 2 + 1] - q[i * 2]) / 1e6; out[n] = +ms.toFixed(2); total += ms; });
+        out.total = +total.toFixed(2);
+        this.gpuTimes = out;
+        T.read.unmap();
+        T.busy = false;
+      }).catch(() => { T.busy = false; });
+    }
     this.histIndex = 1 - k;
     this.frameNo++;
   }
