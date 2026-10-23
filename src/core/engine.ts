@@ -8,7 +8,8 @@ import { initGpu, type Gpu } from '../gpu/device';
 import { Renderer, type FrameStats } from '../render/renderer';
 import { DEFAULT_STYLE, type InkStyle } from '../ink/style';
 import { Walker } from '../controls/walker';
-import { heightAt, type SceneData, type Viewpoint } from '../scene/types';
+import type { SceneData, Viewpoint } from '../scene/types';
+import { addTerrain, groundAt } from '../terrain/chunks';
 
 export interface EngineOptions {
   canvas: HTMLCanvasElement;
@@ -47,14 +48,11 @@ export class Engine {
   }
 
   setScene(data: SceneData): FrameStats {
+    if (data.terrain && data.terrain.drawn !== false) addTerrain(data);
     this.scene = data;
     this.renderer.sun = data.sun;
     this.sceneStats = this.renderer.setScene(data);
-    const near = data.terrain?.near, far = data.terrain?.far;
-    this.walker.ground = (x, z) => {
-      const h = near ? heightAt(near, x, z) : NaN;
-      return Number.isFinite(h) ? h : far ? heightAt(far, x, z) : NaN;
-    };
+    this.walker.ground = (x, z) => groundAt(data, x, z);
     if (data.viewpoints[0]) this.goTo(data.viewpoints[0]);
     return this.sceneStats;
   }

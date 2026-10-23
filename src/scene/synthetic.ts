@@ -114,7 +114,8 @@ function groundHeight(x: number, z: number): number {
   return 0.8 * Math.sin(x * 0.011) * Math.cos(z * 0.013) + lake;
 }
 
-export function syntheticTown(seed = 1103): SceneData {
+/** `heightfield`: the ground as heightfields the engine meshes (src/terrain/chunks.ts) instead of one ground mesh */
+export function syntheticTown(seed = 1103, { heightfield = false } = {}): SceneData {
   const rnd = mulberry32(seed);
   const meshes: MeshData[] = [];
   const add = (m: MeshData) => meshes.push(m) - 1;
@@ -164,7 +165,7 @@ export function syntheticTown(seed = 1103): SceneData {
     const c = Math.cos(yaw), s = Math.sin(yaw);
     return [c * sx, 0, -s * sx, 0, sy, 0, s * sz, 0, c * sz, x, y, z];
   };
-  run({ mesh: ground }).push({ m: trs(0, 0, 0, 1, 1, 1, 0), cls: CLASS_OWN, tone: 1, flags: FLAG_SHADOW });
+  if (!heightfield) run({ mesh: ground }).push({ m: trs(0, 0, 0, 1, 1, 1, 0), cls: CLASS_OWN, tone: 1, flags: FLAG_SHADOW });
   run({ mesh: water }).push({ m: trs(LAKE.x, -0.6, LAKE.z, 1, 1, 1, 0), cls: CLASS_OWN, tone: 1, flags: FLAG_WATER });
   const hills = run({ mesh: hill });
   for (let k = 0; k < 28; k++) {
@@ -206,15 +207,15 @@ export function syntheticTown(seed = 1103): SceneData {
     }
   }
 
-  // the near heightfield, for the walker's feet
-  const cell = 4, width = Math.floor((2 * S) / cell) + 1;
+  // the near heightfield: the walker's feet (and the ground itself with `heightfield`)
+  const cell = heightfield ? 1 : 4, width = Math.floor((2 * S) / cell) + 1;
   const heights = new Float32Array(width * width);
   for (let iz = 0; iz < width; iz++) for (let ix = 0; ix < width; ix++) heights[iz * width + ix] = groundHeight(-S + ix * cell, -S + iz * cell);
   const near: Heightfield = { origin: [-S, -S], cell, width, depth: width, heights };
 
   return {
     name: 'synthetic-town', classes: { ...CLS }, meshes, lodGroups, batches, instances, instanceCount: count,
-    terrain: { near, cls: CLS.GROUND }, water: [{ name: 'lake', level: -0.6, mesh: water }],
+    terrain: { near, cls: CLS.GROUND, drawn: heightfield }, water: [{ name: 'lake', level: -0.6, mesh: water }],
     sun: normalize([0.45, 0.42, -0.79]),
     viewpoints: [
       { id: 1, name: 'causeway', position: [-40, 2.2, -120], target: [60, 4, -620], fovY: 55 },

@@ -54,7 +54,8 @@ export interface SceneData {
   /** 64-byte records (docs/SCENE_FORMAT.md, instances.bin) */
   instances: ArrayBuffer;
   instanceCount: number;
-  terrain?: { near?: Heightfield; far?: Heightfield; cls: number };
+  /** heightfields; `drawn: false` when the scene has its own ground meshes and the fields only carry the walker */
+  terrain?: { near?: Heightfield; far?: Heightfield; cls: number; drawn?: boolean };
   water: { name: string; level: number; mesh: number }[];
   /** towards the sun, unit length */
   sun: [number, number, number];
