@@ -114,8 +114,35 @@ A scene may add these; a scene without them is painted from mesh and terrain cla
 * **`lodGroups[].shadowFrom`**: the finest level that casts the sun's shadow (default 0); an instance drawn at a
   finer level casts through this one (a tree whose finest level is thin alpha-tested strands casts through its crown
   bodies).
+* **`attributes.pattern`** (`uint32` per vertex, with `uv`): the surface pattern whose joints the G-buffer draws from
+  the metric uv: 1 ashlar (uv = along, up m; blocks 1.45 × 0.62), 2 wall (1.0 × 0.42), 3 curb (long stones 1.9 m),
+  4 vault (courses across a barrel: uv = arc, across m), 5 slabs (uv = across, along m; 1.6 × 0.62), 6 steps (1.3 m
+  stones), 7 voussoirs (uv.x an index coordinate: a joint at every integer; uv.y radial m), 8 brick (0.36 × 0.09); 0
+  none.
+* **`viewpoints[].look`**: the id of the look (`looks`) the viewpoint is painted in.
 * **`viewpoints[].fitAspect`**: `fovY` holds at this aspect and wider; a narrower screen widens it to keep the same
   horizontal field.
+
+## Large scenes
+
+A scene the size of a city does not fit one file or one upload:
+
+* **`geometry`**: `["geometry.0.bin", "geometry.1.bin", …]` (default `["geometry.bin"]`): the geometry in several
+  files, each at most 24 MiB (static hosts cap a file at 25 MiB); every attribute and index reference may carry
+  `"file": k`, the index into this list (default 0), its `offset` then counting from the start of that file. No array
+  crosses a file boundary; a mesh too large for one file is split into several meshes (a LOD level can hold several,
+  below).
+* **LOD levels of several meshes**: a level is `{ "meshes": [3, 4, 5], "to": 380 }` (or `{ "mesh": 3, "to": … }` for
+  one); every mesh of the level is drawn for the instance (a building's wood, tiles and stone; a mesh split for size).
+  `"meshes": []` draws nothing over that range (a far massing that only appears beyond a distance: its group's first
+  level is empty). Every mesh of a group is in the instance's space; the level is chosen from the distance between the
+  eye and the group's `bounds` (`{ "center", "radius" }` in the instance's space; default the first non-empty level's
+  first mesh's bounds), so all the parts of a building change level together. At most 8 meshes per level, 4 levels.
+* **`looks`**: `[{ "id", "name", "en", "sun": [x, y, z], "season": "spring" | "summer" | "autumn" | "winter",
+  "night": false, "snow": 0, "ink": { … } }]`, the times and seasons a world is painted in: the sun (towards it, unit
+  length; at night the moon), and the world's own ink settings for that look (`ink`: names the world chooses; Mo's
+  demo reads `ranges` = far ranges painted on the sky, in degrees: base elevation, step, ridge amplitude, count,
+  azimuth centre, half width, ink, mist fade). `sun` at the top level is the first look's.
 
 ## What a version-0 exporter leaves out
 
