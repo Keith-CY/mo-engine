@@ -13,8 +13,8 @@
    ink02) and the live site.
 
 Done when: the comfort checks pass (turn residual at the resampling floor, flick starts within 2 × the frame target,
-no LOD or quality steps while turning), 60 fps while walking and turning at 1440 × 900 on this Mac's GPU when it is not
-loaded, and a side-by-side video and link (old site / Mo) go to the owner.
+no LOD or quality steps while turning), 60 fps while walking and turning at 1440 × 900 on an Apple Silicon laptop GPU
+when it is not loaded, and a side-by-side video and link (old site / Mo) are published.
 
 ## Later
 

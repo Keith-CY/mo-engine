@@ -93,6 +93,27 @@ Instances of a batch are contiguous; batches do not overlap.
 (`origin[0] + ix · cell`, `origin[1] + iz · cell`). Under water the value is the bed, not the water surface. The near
 field covers the region plus a margin; the far field covers everything that can be seen from it.
 
+## Optional fields
+
+A scene may add these; a scene without them is painted from mesh and terrain classes alone.
+
+* **`attributes.class`** (`uint32` per vertex): bits 0–15 the class of the vertex's triangles (the three vertices of a
+  triangle agree), `0xFFFF` for the mesh's own; bit 16 set: the triangle is alpha-tested. An instance class other than
+  `0xFFFFFFFF` still overrides every triangle. One mesh can then hold bark and leaves, or wood and tiles.
+* **`mask`** on a mesh: `{ "texture": 0, "cutoff": 0.5, "all": true }`: its alpha-tested triangles sample
+  `textures[texture]` at their uv and are discarded below `cutoff`; with no class attribute, `all` alpha-tests every
+  triangle. Mo builds the mask's mip levels so that the covered share stays the same at every level (foliage does not
+  thin out with distance).
+* **`textures`**: `[{ "name", "file", "width", "height", "format": "r8unorm" }]`, row-major texels, row 0 at v = 0.
+* **`terrain.near.classMap`**: `{ "file", "format": "uint8" }`, the class of each near sample (same grid as the
+  heights), e.g. GROUND or PAVE.
+* **`paths`**: `[{ "name", "points": [[x, z], …], "halfWidth", "slab", "crown" }]`, slab paths along a centre line
+  (world X, Z, up to 8 points, up to 4 paths): the ground within `halfWidth` of the line and higher than `crown`
+  metres is paving, laid in courses `slab` metres long. Where a scene has paths they decide the paving (an exact edge at
+  any distance); otherwise the class map does.
+* **`viewpoints[].fitAspect`**: `fovY` holds at this aspect and wider; a narrower screen widens it to keep the same
+  horizontal field.
+
 ## What a version-0 exporter leaves out
 
 The sky (the engine paints its own), mist, smoke and spray particles, shadow-only stand-ins, camera-facing impostors,
