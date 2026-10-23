@@ -93,6 +93,8 @@ export class Renderer {
   benchSkip = new Set<string>();
   /** G-buffer work left out (benchmarks only, bits): 1 the surface functions, 2 the cast shadow, 4 the alpha test */
   benchFlags = 0;
+  /** benchmarks: draw the shadow cascades every frame, as a walking eye makes them */
+  benchShadowsAlways = false;
   /** benchmarks: the G-buffer compiled without discard (foliage drawn whole); rebuildGbuffer() after a change */
   benchNoDiscard = false;
   rebuildGbuffer(): void {
@@ -189,7 +191,7 @@ export class Renderer {
   }
 
   /** the season the world is painted in: meshes out of it are not drawn */
-  setSeason(season: string): void { this.scene?.setSeason(this.device, season); }
+  setSeason(season: string): void { this.scene?.setSeason(this.device, season); this.shadowKeys = []; }
 
   /** the G-buffer pipeline, with a world's surface functions (WGSL) compiled in */
   private surfacesCode = SURFACES;
@@ -428,6 +430,7 @@ export class Renderer {
     d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
     this.bundles = undefined;
     this.frameNo = 0;
+    this.shadowKeys = [];
     return { slots: s.slots.length, instances: s.instanceCount, triangles: s.triangles };
   }
 
@@ -519,6 +522,9 @@ export class Renderer {
   }
 
   sun: [number, number, number] = [0.45, 0.42, -0.79];
+  /** each cascade's box and sun as last drawn, and whether it must be drawn again */
+  private shadowKeys: string[] = [];
+  private shadowDirty: boolean[] = [];
   private readonly unjittered = new Float32Array(16);
 
   /** the sun's light space and each cascade: a box around the eye, snapped to whole texels of the world (so walking
@@ -543,6 +549,10 @@ export class Renderer {
         -cx / R, -cy / R, 0.5, 1,
       ], 156 + k * 16);
       f.set([cx, cy, R, Z], 188 + k * 4);
+      // (the map holds what the sun sees from this box: drawn again only when the box moves by a texel, the sun turns or
+      // the scene changes — at rest no shadow is drawn at all)
+      const key = `${(ex + cx).toFixed(3)},${(ey + cy).toFixed(3)},${b.join()}`;
+      if (key !== this.shadowKeys[k]) { this.shadowKeys[k] = key; this.shadowDirty[k] = true; }
     });
   }
 
@@ -569,6 +579,8 @@ export class Renderer {
       cp.end();
     }
     for (let k = 0; k < (this.benchSkip.has('shadow') ? 0 : CASCADE_RADII.length); k++) {
+      if (!this.shadowDirty[k] && !this.benchShadowsAlways) continue;
+      this.shadowDirty[k] = false;
       const sp = enc.beginRenderPass({
         label: `mo shadow ${k}`, colorAttachments: [], timestampWrites: tw(`shadow${k}`),
         depthStencilAttachment: { view: this.shadowMap.createView({ dimension: '2d', baseArrayLayer: k, arrayLayerCount: 1 }), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
@@ -635,6 +647,7 @@ export class Renderer {
     const s = this.scene;
     if (s) this.device.queue.writeBuffer(s.lodState, 0, new Uint32Array(s.instanceCount).fill(0xffff));
     this.frameNo = 0;
+    this.shadowKeys = [];
   }
 
   /** every instance's current LOD level (0xff: none yet; ≥ levels: beyond the last), for the comfort checks */

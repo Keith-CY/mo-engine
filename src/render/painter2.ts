@@ -122,8 +122,8 @@ export class Painter2 {
     this.zero?.destroy(); this.zero = zero;
     pass('p2 jfa', P.jfa, [{ buffer: ub([0, 0, 0, 0]) }, t.edge.createView(), zero.createView()], t.jfa[0]);
     let src = 0;
-    // (the lines are a few px wide and their bleed a few more: a reach of 15 px is plenty)
-    for (const s of [8, 4, 2, 1]) {
+    // (the lines are a few px wide and their bleed a few more: a reach of 7 px is plenty)
+    for (const s of [4, 2, 1]) {
       pass('p2 jfa', P.jfa, [{ buffer: ub([s, 0, 0, 0]) }, t.edge.createView(), t.jfa[src].createView()], t.jfa[1 - src]);
       src = 1 - src;
     }

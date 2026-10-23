@@ -29,20 +29,32 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (c == C_SKY) { return vec4f(999.0); }
   let D = a.z;
   let uK = K.res.z;
-  let stepPx = 3.0 * uK;
+  // (6 px steps and one more refinement: the reach and the precision of linan's 3 px steps, half the fetches)
+  let stepPx = 6.0 * uK;
   let live = K.look4.z > 0.5;
   if (c == C_WATER) {
     var sh = 999.0;
-    for (var i = 1; i <= 80; i++) {
-      if (f32(i) > K.look4.w) { break; }   // (the walking painting looks 120 px, a still 240: far lanterns' reflections)
+    for (var i = 1; i <= 40; i++) {
+      if (f32(i) * 2.0 > K.look4.w) { break; }   // (the walking painting looks 120 px, a still 240: far lanterns' reflections)
       let dy = f32(i) * stepPx;
-      if (fc.y - dy > 0.0) { let cb = clsOf(at(fc.x, fc.y - dy)); if (cb != C_WATER && cb != C_SKY) { sh = dy; break; } }
-      if (fc.y + dy < H) { let cb = clsOf(at(fc.x, fc.y + dy)); if (cb != C_WATER && cb != C_SKY) { sh = dy; break; } }
+      var dir = 0.0;
+      if (fc.y - dy > 0.0) { let cb = clsOf(at(fc.x, fc.y - dy)); if (cb != C_WATER && cb != C_SKY) { dir = -1.0; } }
+      if (dir == 0.0 && fc.y + dy < H) { let cb = clsOf(at(fc.x, fc.y + dy)); if (cb != C_WATER && cb != C_SKY) { dir = 1.0; } }
+      if (dir != 0.0) {
+        // refine to the pixel (the shore's mirror line would step in whole steps: the reflection drawn in blocks)
+        var lo = dy - stepPx; var hi = dy;
+        for (var k = 0; k < 4; k++) {
+          let mid = 0.5 * (lo + hi);
+          let cm = clsOf(at(fc.x, fc.y + dir * mid));
+          if (cm != C_WATER && cm != C_SKY) { hi = mid; } else { lo = mid; }
+        }
+        sh = hi; break;
+      }
     }
     return vec4f(999.0, 999.0, sh / uK, 999.0);
   }
   var dist = 999.0;
-  for (var i = 1; i <= 80; i++) {
+  for (var i = 1; i <= 40; i++) {
     let y = fc.y - f32(i) * stepPx;
     if (y <= 0.0) { dist = 999.0; break; }
     let b = at(fc.x, y);
@@ -50,7 +62,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     if (cb == C_SKY || depthOf(b) > D * 1.08 + 8.0) {
       // refine to the pixel so ridge bands do not step
       var lo = f32(i - 1) * stepPx; var hi = f32(i) * stepPx;
-      for (var k = 0; k < 3; k++) {
+      for (var k = 0; k < 4; k++) {
         let mid = 0.5 * (lo + hi);
         let m = at(fc.x, fc.y - mid);
         if (clsOf(m) == C_SKY || depthOf(m) > D * 1.08 + 8.0) { hi = mid; } else { lo = mid; }
@@ -59,7 +71,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     }
   }
   var base = 999.0; var layer = 999.0;
-  for (var i = 1; i <= 60; i++) {
+  for (var i = 1; i <= 30; i++) {
     let y = fc.y + f32(i) * stepPx;
     // (the walking painting: the frame's edge is no base, and a nearer form's edge is found to the pixel)
     if (y >= H) { if (base > 998.0 && !live) { base = f32(i) * stepPx / uK; } break; }
@@ -69,7 +81,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
       base = f32(i) * stepPx / uK;
       if (live) {
         var lo = f32(i - 1) * stepPx; var hi = f32(i) * stepPx;
-        for (var k = 0; k < 3; k++) {
+        for (var k = 0; k < 4; k++) {
           let mid = 0.5 * (lo + hi);
           let m = at(fc.x, fc.y + mid);
           if (clsOf(m) == C_WATER || depthOf(m) < D * 0.9 - 4.0) { hi = mid; } else { lo = mid; }
@@ -81,7 +93,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // land, trees or water make a layer (a pagoda before a hillside is no gap for mist)
     if (cb == C_WATER || (depthOf(b) < D * 0.6 - 6.0 && (isLand(cb) || isFol(cb)))) {
       var lo = f32(i - 1) * stepPx; var hi = f32(i) * stepPx;
-      for (var k = 0; k < 3; k++) {
+      for (var k = 0; k < 4; k++) {
         let mid = 0.5 * (lo + hi);
         let m = at(fc.x, fc.y + mid);
         let cm = clsOf(m);

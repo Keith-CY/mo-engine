@@ -438,6 +438,49 @@ fn gShade(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } r
 fn gAlb(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } return b.z; }
 fn originOf(ii: u32) -> vec3f { return vec3f(bitcast<f32>(inst[ii * 16u + 9u]), bitcast<f32>(inst[ii * 16u + 10u]), bitcast<f32>(inst[ii * 16u + 11u])); }
 
+/** the brush line through the nearest seed of the jump flood (J): its strength, width, direction and type → the line's
+ *  ink and its 洇 beside it */
+fn brushLine(J: vec4u, fc: vec2f, idk: f32, fK: f32, grain: f32) -> vec2f {
+  let uK = K.res.z; let pxA = K.res.w; let match_ = K.look3.y > 0.0;
+  let near = K.sh0.x; let far = K.sh0.y; let ridgeFrom = K.sh1.y;
+  let sp = vec2i(i32(J.x & 0xffffu), i32(J.x >> 16u));
+  let E = textureLoad(tEdge, sp, 0);
+  let SA = texA(sp);
+  let sOut = vec2f(sp) + 0.5;
+  let vl = fc - sOut;
+  let Ps = relPosOf(sOut / K.res.xy, depthOf(SA)) + F.eye.xyz;
+  let fps = depthOf(SA) * pxA * uK;
+  let nrm = vec2f(cos(E.z), sin(E.z));
+  let typ = E.w;
+  let n1 = lodNoise(Ps, fps * 30.0);
+  let n2 = lodNoise(Ps + 17.3, fps * 70.0);
+  var pressure = select(smoothstep(0.2, 0.6, n1) * (0.55 + 0.75 * n1), 0.85 + 0.25 * n1, typ > 0.5 && typ < 1.5);
+  if (typ > 1.5 && typ < 2.5) { pressure *= smoothstep(0.3, 0.55, lodNoise(Ps + 5.1, fps * 18.0)); }   // foliage / ground: broken
+  // rock: long tapered strokes with gaps between them (the brush lifts), heavier toward the focus
+  if (typ > 2.5 && typ < 3.5) { pressure *= smoothstep(0.32, 0.62, lodNoise(Ps + 8.3, fps * 55.0)) * (0.55 + 0.6 * lodNoise(Ps + 2.2, fps * 25.0)); }
+  // the carving: an even, unbroken fine line (白描)
+  if (typ > 3.5) { pressure = 0.75 + 0.35 * n1; }
+  let fine = (typ > 0.5 && typ < 1.5) || typ > 3.5;
+  let w = E.y * pressure * K.st1.z;
+  let off = (n2 - 0.5) * 2.0 * K.st2.x * uK * select(1.0, 0.12, fine);
+  let sd = select(-1.0, 1.0, dot(vl, nrm) >= 0.0);
+  let d = max(length(vl) - off * sd, 0.0);
+  var cov = smoothstep(w + 0.7 * uK, w - 0.5 * uK, d) * E.x;
+  // 飞白: dry streaks along the stroke where the brush runs out
+  let across = d * sd / max(w, 0.5);
+  let br = vnoise3(vec3f(across * 2.6 + 31.0, 0.0, 0.0) + Ps / max(fps * 14.0, 1e-4));
+  let dry = select(mix(K.st2.y, 1.0, pow(1.0 - clamp(pressure, 0.0, 1.0), 2.0)), K.st2.y * 0.3, fine);
+  cov *= 1.0 - dry * smoothstep(0.4, 0.62, br);
+  // brush lines on land and trees lighter than the 界画 of the buildings, fading out on the far masses
+  let sc0 = clsOf(SA);
+  let lk = select(1.0, 0.7 * (1.0 - 0.7 * smoothstep(ridgeFrom * 0.4, ridgeFrom, depthOf(SA))), match_ && !isArch(sc0) && sc0 != C_FIGURE);
+  let lineInk = lk * cov * (0.75 + 0.35 * n2) * mix(1.0, select(0.5, 0.3, match_), smoothstep(near * 1.5, far * 0.5, depthOf(SA))) * select(mix(0.45, 1.0, idk), mix(0.75, 1.0, fK), fine);
+  // 洇: the ink creeps a little into the fibres beside the line
+  var bleed = 0.0;
+  if (d > w) { bleed = lk * exp(-(d - w) / (1.3 * uK)) * 0.22 * E.x * pressure * (0.4 + grain); }
+  return vec2f(lineInk, bleed);
+}
+
 @fragment
 fn fs(v: VOut) -> @location(0) vec4f {
   let fc = v.pos.xy;
@@ -469,7 +512,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   var RG = textureLoad(tRidge, min(gp / 2, rsz - 1), 0);
   var rdist = RG.r;
   // the far washes grade from a smoothed ridge (trees along a ridge make the distance jump from column to column)
-  if (match_ && rdist < 998.0) {
+  if (match_ && rdist < 998.0 && D > ridgeFrom * 0.45) {
     var sum = min(rdist, 400.0); var nn = 1.0;
     for (var i = -3; i <= 3; i++) {
       if (i == 0) { continue; }
@@ -489,6 +532,66 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let PP = paperOf(dirW, uv);
   var paper = PP.rgb; let grain = PP.w;
   paper = mix(paper, vec3f(0.955, 0.95, 0.93) * (0.97 + 0.03 * grain), paperLift * 0.3);
+
+  // ---------------- the sky: its own short path (paper, the painted ranges, clouds, the glow, the night; the lines that
+  // spill onto it from the silhouettes), as the general path below paints it
+  if (cls == C_SKY) {
+    let tFs = smp(tBlur, uv).r; let tBs = smp(tBroad, uv).r;
+    var tSs = tFs;
+    let sunAng = acos(clamp(dot(dirW, F.sun.xyz), -1.0, 1.0));
+    if (night) { tSs = 0.08 + 0.6 * (1.0 - smoothstep(0.016, 0.02, sunAng)) + 0.25 * exp(-sunAng / 0.05); }
+    let toneS = pow(clamp(mix(tBs, tFs, 0.35) * K.sh1.z, 0.0, 1.0), K.sh1.w);
+    let w0s = pow(clamp((1.0 - toneS - K.st0.z) / (1.0 - K.st0.z), 0.0, 1.0), K.st0.y);
+    var w1 = w0s * select(0.1, K.sh2.x * 1.6, night) * inkGain;
+    var cl = vec2f(0.0);
+    var RNG = vec3f(0.0);
+    if (!night) {
+      RNG = paintedRanges(dirW);
+      if (K.look2.z > 0.0) { cl = cloudsAt(dirW) * min(1.0, K.look2.z * 2.0); }
+      if (RNG.z > 0.0) { w1 = max(w1, RNG.x * inkGain * (1.0 - 0.8 * cl.x)); }
+      w1 = max(w1 * (1.0 - 0.7 * cl.x), 0.32 * cl.y);
+    }
+    let glowW = K.look5.x * exp(-sunAng / 0.075);
+    if (!night) { w1 *= (1.0 - 0.9 * clamp(glowW, 0.0, 1.0)) * select(1.0, 0.5, K.look5.x > 0.0); }
+    if (!night && K.look6.w > 0.0) {
+      let sEl = asin(clamp(F.sun.y, -1.0, 1.0)); let el = asin(clamp(dirW.y, -1.0, 1.0));
+      let d2 = normalize(dirW.xz + vec2f(1e-6, 0.0)); let az = atan2(d2.x, d2.y);
+      let cq = vec2f(az * 14.0, (el - sEl) * 95.0);
+      let cn = vnoise2(cq) * 0.55 + vnoise2(cq * vec2f(2.6, 1.8) + 4.0) * 0.3 + vnoise2(cq * vec2f(7.0, 3.0) + 9.0) * 0.15;
+      let sn = normalize(F.sun.xz + vec2f(1e-6, 0.0)); let sAz = atan2(sn.x, sn.y);
+      let dAz = -(fmodp(az - sAz + 3.14159, 6.28318) - 3.14159);
+      let win = smoothstep(-0.01, 0.006, el - sEl) * (1.0 - smoothstep(0.035, 0.07, el - sEl)) * smoothstep(0.02, 0.07, dAz) * (1.0 - smoothstep(0.3, 0.45, dAz));
+      let band = smoothstep(0.5, 0.68, cn) * win;
+      let cu = cq + vec2f(0.0, 0.35);
+      let under = smoothstep(0.62, 0.5, vnoise2(cu) * 0.55 + vnoise2(cu * vec2f(2.6, 1.8) + 4.0) * 0.3 + 0.075);
+      w1 = max(w1, K.look6.w * band * (0.1 + 0.12 * under) * (1.0 - 0.85 * clamp(glowW * 1.4, 0.0, 1.0)));
+    }
+    if (night) {
+      let sweep = vnoise3(dirW * vec3f(2.0, 14.0, 2.0));
+      let moon = smoothstep(0.42, 0.55, tSs);
+      let halo = smoothstep(0.12, 0.4, tBs);
+      w1 = (0.52 + 0.22 * smoothstep(0.0, 0.45, dirW.y) + 0.035 * (sweep - 0.5)) * K.sh2.x * (1.0 - moon) * (1.0 - 0.35 * halo);
+    }
+    // (laid flat, in one go; the broad brush's sweep is even on the sky; granulation)
+    var inkS = w1 * (1.0 - K.st1.y * 0.5 + K.st1.y * grain);
+    let Js = textureLoad(tJfa, gp, 0);
+    if (Js.w != 0u && (bench & 1u) == 0u && F_LINES) { let bl = brushLine(Js, fc, idk, fK, grain); inkS += bl.x * 1.5 + bl.y; }
+    var absS = vec3f(0.0);
+    if (K.look.w > 0.0 && !night) {
+      let hz = 1.0 - smoothstep(0.0, 0.35, dirW.y);
+      let toSun = pow(max(dot(dirW, F.sun.xyz), 0.0), 6.0);
+      absS += (P_ZHE * 0.3 * (0.3 + 0.7 * toSun) + P_TENG * 0.25 * toSun) * K.sh3.x * hz * K.look.w;
+    }
+    if (K.look5.x > 0.0 && !night) { absS += (P_TENG * 0.17 + P_ZHE * 0.17) * glowW * (1.0 - 0.8 * exp(-sunAng / 0.012)) + (P_ZHE * 0.05 + P_INK * 0.03) * (1.0 - clamp(glowW * 1.5, 0.0, 1.0)); }
+    if (K.skyTint.w > 0.0) {
+      let up = smoothstep(0.0, 0.45, dirW.y);
+      absS += K.skyTint.rgb * K.skyTint.w * (0.25 + 0.75 * up) * select((1.0 - cl.x) * (1.0 - 0.6 * RNG.x), 1.0 - smoothstep(0.42, 0.55, tSs), night);
+      if (night) { absS += K.skyTint.rgb * K.skyTint.w * 0.35 * (1.0 - smoothstep(0.42, 0.55, tSs)); }
+    }
+    var colS = paper * exp(-absS) * exp(-K.inkAbs.rgb * K.tint.rgb * inkS * 2.4);
+    if (K.look5.x > 0.0 && !night) { colS = mix(colS, vec3f(1.0, 0.985, 0.94), K.look5.x * exp(-sunAng / 0.012) * 0.9); }
+    return vec4f(clamp(colS, vec3f(0.0), vec3f(1.0)), 1.0);
+  }
 
   // ---------------- tone → wash
   var tF = smp(tBlur, uv).r; let tB = smp(tBroad, uv).r;
@@ -970,42 +1073,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // ---------------- brush lines (the nearest seed of the jump flood: its strength, width, direction and type)
   var lineInk = 0.0; var bleed = 0.0;
   let J = textureLoad(tJfa, gp, 0);
-  if (J.w != 0u && (bench & 1u) == 0u && F_LINES) {
-    let sp = vec2i(i32(J.x & 0xffffu), i32(J.x >> 16u));
-    let E = textureLoad(tEdge, sp, 0);
-    let SA = texA(sp);
-    let sOut = vec2f(sp) + 0.5;
-    let vl = fc - sOut;
-    let Ps = relPosOf(sOut / K.res.xy, depthOf(SA)) + F.eye.xyz;
-    let fps = depthOf(SA) * pxA * uK;
-    let nrm = vec2f(cos(E.z), sin(E.z));
-    let typ = E.w;
-    let n1 = lodNoise(Ps, fps * 30.0);
-    let n2 = lodNoise(Ps + 17.3, fps * 70.0);
-    var pressure = select(smoothstep(0.2, 0.6, n1) * (0.55 + 0.75 * n1), 0.85 + 0.25 * n1, typ > 0.5 && typ < 1.5);
-    if (typ > 1.5 && typ < 2.5) { pressure *= smoothstep(0.3, 0.55, lodNoise(Ps + 5.1, fps * 18.0)); }   // foliage / ground: broken
-    // rock: long tapered strokes with gaps between them (the brush lifts), heavier toward the focus
-    if (typ > 2.5 && typ < 3.5) { pressure *= smoothstep(0.32, 0.62, lodNoise(Ps + 8.3, fps * 55.0)) * (0.55 + 0.6 * lodNoise(Ps + 2.2, fps * 25.0)); }
-    // the carving: an even, unbroken fine line (白描)
-    if (typ > 3.5) { pressure = 0.75 + 0.35 * n1; }
-    let fine = (typ > 0.5 && typ < 1.5) || typ > 3.5;
-    let w = E.y * pressure * K.st1.z;
-    let off = (n2 - 0.5) * 2.0 * K.st2.x * uK * select(1.0, 0.12, fine);
-    let sd = select(-1.0, 1.0, dot(vl, nrm) >= 0.0);
-    let d = max(length(vl) - off * sd, 0.0);
-    var cov = smoothstep(w + 0.7 * uK, w - 0.5 * uK, d) * E.x;
-    // 飞白: dry streaks along the stroke where the brush runs out
-    let across = d * sd / max(w, 0.5);
-    let br = vnoise3(vec3f(across * 2.6 + 31.0, 0.0, 0.0) + Ps / max(fps * 14.0, 1e-4));
-    let dry = select(mix(K.st2.y, 1.0, pow(1.0 - clamp(pressure, 0.0, 1.0), 2.0)), K.st2.y * 0.3, fine);
-    cov *= 1.0 - dry * smoothstep(0.4, 0.62, br);
-    // brush lines on land and trees lighter than the 界画 of the buildings, fading out on the far masses
-    let sc0 = clsOf(SA);
-    let lk = select(1.0, 0.7 * (1.0 - 0.7 * smoothstep(ridgeFrom * 0.4, ridgeFrom, depthOf(SA))), match_ && !isArch(sc0) && sc0 != C_FIGURE);
-    lineInk = lk * cov * (0.75 + 0.35 * n2) * mix(1.0, select(0.5, 0.3, match_), smoothstep(near * 1.5, far * 0.5, depthOf(SA))) * select(mix(0.45, 1.0, idk), mix(0.75, 1.0, fK), fine);
-    // 洇: the ink creeps a little into the fibres beside the line
-    if (d > w) { bleed = lk * exp(-(d - w) / (1.3 * uK)) * 0.22 * E.x * pressure * (0.4 + grain); }
-  }
+  if (J.w != 0u && (bench & 1u) == 0u && F_LINES) { let bl = brushLine(J, fc, idk, fK, grain); lineInk = bl.x; bleed = bl.y; }
   // ---------------- 苔点: moss dots on the ridge tops of near hills and rocks
   var moss = 0.0;
   if (K.st3.y > 0.0 && J.w != 0u) {

@@ -4,7 +4,8 @@
 //   node tools/bench.mjs --q "scene=…" --vps 2,7 [--w 1440 --h 900] [--frames 40] [--rounds 3]
 //                        [--configs "p2;p2-paint;p1"]   (p1 painter 1; p2 painter 2; p2-<stage,…> without those stages;
 //                        …/<part,…> without those parts of the frame: cull, shadow, gbuffer; gN: G-buffer bench
-//                        flags, 1 no surface functions, 2 no cast shadow, 4 no alpha test; p2-kN: painting bench flags,
+//                        flags, 1 no surface functions, 2 no cast shadow, 4 no alpha test; …/rest the eye at rest (shadows not
+//                        redrawn); p2-kN: painting bench flags,
 //                        1 lines, 2 dark detail, 4 ground patches, 8 leaf marks, 32 皴)
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,10 +43,12 @@ try {
           const no = (pp.find((x) => x.startsWith('no:')) ?? 'no:').slice(3).split('+').filter(Boolean);
           const want = Object.fromEntries(Object.keys(r.p2.features).map((k) => [k, !no.includes(k)]));
           if (JSON.stringify(want) !== JSON.stringify(r.p2.features)) { r.p2.features = want; await r.p2.reinit(); }
-          r.benchSkip = new Set(fc ? fc.split(',').filter((x) => !/^g\d+$/.test(x) && x !== 'nodiscard') : []);
+          r.benchSkip = new Set(fc ? fc.split(',').filter((x) => !/^g\d+$/.test(x) && x !== 'nodiscard' && x !== 'rest') : []);
           r.benchFlags = Number((fc ?? '').split(',').find((x) => /^g\d+$/.test(x))?.slice(1) ?? 0);
           const nd = (fc ?? '').split(',').includes('nodiscard');
           if (nd !== r.benchNoDiscard) { r.benchNoDiscard = nd; r.rebuildGbuffer(); }
+          // (a walking eye redraws the shadows every frame; the bench measures that, not a resting eye)
+          r.benchShadowsAlways = !c.includes('rest');
           for (let i = 0; i < 4; i++) r.render(e.camera, 0);
           await dev.queue.onSubmittedWorkDone();
           const t0 = performance.now();
