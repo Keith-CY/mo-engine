@@ -85,6 +85,14 @@ export class Engine {
     if (typeof ink.groundY === 'number') st.look.groundY = ink.groundY;
     if (Array.isArray(ink.bands)) st.look.bands = (ink.bands as number[][]).slice(0, 3).map((b) => [b[0], b[1], b[2], b[3]] as [number, number, number, number]);
     if (Array.isArray(ink.mist) && ink.mist.length >= 4) st.look.mist = (ink.mist as number[]).slice(0, 4) as [number, number, number, number];
+    // the sky, the water and the colour accents (linan's ink shots: src/ink/styles.js INK_SHOTS)
+    const num = (k: string) => (typeof ink[k] === 'number' ? (ink[k] as number) : undefined);
+    const v4 = (k: string) => (Array.isArray(ink[k]) && (ink[k] as number[]).length >= 4 ? ((ink[k] as number[]).slice(0, 4) as [number, number, number, number]) : undefined);
+    st.look.accent = num('accent') ?? 0; st.look.warm = num('warm') ?? 0; st.look.glow = num('glow') ?? 0;
+    st.look.clouds = num('clouds') ?? 0; st.look.cloudBands = num('cloudBands') ?? 0;
+    st.look.skyTint = v4('skyTint'); st.look.moonCol = v4('moonCol');
+    st.look.waterBase = num('waterBase') ?? num('water') ?? 0.05;
+    st.look.night = !!(L.night || num('night')); st.look.skyInk = num('sky') ?? 0;
     this.renderer.setStyle(st);
   }
   private baseStyle?: InkStyle;

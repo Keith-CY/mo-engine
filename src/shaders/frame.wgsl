@@ -31,6 +31,10 @@ struct Frame {
   shotPos: vec4f,         // the look's own viewpoint (xyz) its mist bands are measured from, the ground height there
   bands: array<vec4f, 3>, // 留白: mist lying low at a distance from shotPos: distance, half width, amount, ceiling (m)
   mist: vec4f,            // a band of mist below a height: from y0, full below y1 … (y0, y1, beyond this distance, amount)
+  accent: vec4f,          // colour accents (maple, ginkgo, lotus, the warm sky), warm sky, the sun's glow, clouds
+  skyTint: vec4f,         // a sky tint (absorbance rgb, amount): blue by day, the night's indigo
+  moonCol: vec4f,         // the sun's or moon's path on the water: amount, half width (rad), widening per rad below, dashes
+  water: vec4f,           // the water's own wash, night (1), the night sky's ink, cloud bands
 };
 
 const CASCADES = 2u;

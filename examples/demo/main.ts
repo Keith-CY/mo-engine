@@ -17,8 +17,6 @@ async function main(): Promise<void> {
   const scene = P.get('scene') ? await loadMoScene(P.get('scene')!) : syntheticTown(Number(P.get('seed')) || 1103, { heightfield: P.get('terrain') === '1' });
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
-  // ?look=id: paint in that look (a viewpoint brings its own)
-  if (P.get('look')) engine.setLook(Number(P.get('look')));
   // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
   if (P.get('paper') === '0' || P.get('marks') === '0' || P.get('lines') === '0') {
     const st = structuredClone(engine.renderer.style);
@@ -37,6 +35,8 @@ async function main(): Promise<void> {
     const at = P.get('at')!.split(',').map(Number) as [number, number, number], to = P.get('to')!.split(',').map(Number) as [number, number, number];
     engine.goTo({ id: 0, name: 'at', position: at, target: to, fovY: Number(P.get('fov')) || 50 });
   }
+  // ?look=id: paint in that look (a viewpoint brings its own)
+  if (P.get('look')) engine.setLook(Number(P.get('look')));
   addEventListener('keydown', (e) => {
     // 1 … 9, 0: the viewpoints (0 the tenth); L: the next look
     const n = /^Digit([0-9])$/.exec(e.code);

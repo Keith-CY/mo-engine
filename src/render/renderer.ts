@@ -18,7 +18,7 @@ import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 
-const FRAME_FLOATS = 240;
+const FRAME_FLOATS = 256;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -408,6 +408,10 @@ export class Renderer {
     f.set([...(L.shotPos ?? [0, 0, 0]), L.groundY ?? 0], 220);
     for (let k = 0; k < 3; k++) f.set(L.bands?.[k] ?? [0, 0, 0, 0], 224 + k * 4);
     f.set(L.mist ?? [0, 0, 0, 0], 236);
+    f.set([L.accent ?? 0, L.warm ?? 0, L.glow ?? 0, L.clouds ?? 0], 240);
+    f.set(L.skyTint ?? [0, 0, 0, 0], 244);
+    f.set(L.moonCol ?? [0, 0, 0, 0], 248);
+    f.set([L.waterBase ?? 0.05, L.night ? 1 : 0, L.skyInk ?? 0, L.cloudBands ?? 0], 252);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];

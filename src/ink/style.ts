@@ -48,6 +48,22 @@ export interface Look {
   groundY?: number;
   bands?: [number, number, number, number][];
   mist?: [number, number, number, number];
+  /** colour accents (maple, ginkgo, lotus, a warm sky) 0 … 1; the warm sky toward the sun; the sun's glow (its disc,
+   *  a pale gold halo, its path on the water); clouds and cloud bands */
+  accent?: number;
+  warm?: number;
+  glow?: number;
+  clouds?: number;
+  cloudBands?: number;
+  /** a sky tint: absorbance (rgb) and amount */
+  skyTint?: [number, number, number, number];
+  /** the sun's or moon's path on the water: amount, half width (rad), widening per rad below the horizon, dashes */
+  moonCol?: [number, number, number, number];
+  /** the water's own wash */
+  waterBase?: number;
+  /** a night painting: the sky's ink */
+  night?: boolean;
+  skyInk?: number;
 }
 
 export interface InkStyle {

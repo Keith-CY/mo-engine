@@ -29,6 +29,37 @@ const C_GROUND = 1u; const C_ROCK = 2u; const C_WATER = 3u; const C_BARK = 11u; 
 fn isArch(c: u32) -> bool { return (c >= 4u && c <= 7u) || c == 13u || c == 19u || c == 21u || c == 22u || c == 25u; }
 const M_GRAIN = 1u; const M_LEAF = 2u; const M_VEIL = 3u; const M_GRASS = 4u; const M_PAVE = 5u; const M_ROCK = 6u;
 const M_BLOSSOM = 8u;
+const C_ROOF = 4u; const C_GLOW = 13u; const C_PINE = 8u; const C_MAPLE = 18u; const C_GINKGO = 23u; const C_IVY = 26u; const C_BLOOM = 28u;
+// pigment absorbances (display-referred, after linan src/ink/styles.js PIGMENT): carbon ink, 赭石 ochre, 花青 indigo,
+// 藤黄 gamboge, 朱砂 cinnabar
+const P_INK = vec3f(0.92, 0.98, 1.06); const P_ZHE = vec3f(0.18, 0.42, 0.85); const P_HUA = vec3f(0.95, 0.55, 0.28);
+const P_TENG = vec3f(0.03, 0.12, 0.95); const P_ZHU = vec3f(0.06, 0.85, 0.80);
+
+/** clouds on a layer ~2 km up, seen from the eye (fixed to the world, so a turn moves them rigidly): (coverage, the
+ *  shaded underside) */
+/** a night painting: the day's painting graded into the night's indigo (paper a deep blue, ink near black-blue) */
+fn nightGrade(c: vec3f) -> vec3f {
+  let l = dot(c, vec3f(0.3, 0.55, 0.15));
+  return mix(vec3f(0.035, 0.045, 0.085), vec3f(0.3, 0.37, 0.5), smoothstep(0.05, 0.98, l));
+}
+
+fn cloudsAt(dirW: vec3f) -> vec2f {
+  if (dirW.y <= 0.01) { return vec2f(0.0); }
+  let H = 2000.0;
+  let q = (F.eye.xz + dirW.xz * ((H - F.eye.y) / dirW.y)) / 900.0;
+  let n = fbm3(vec3f(q, 0.7), 4);
+  let cover = smoothstep(0.52, 0.66, n) * smoothstep(0.01, 0.08, dirW.y);
+  // the underside: where the noise falls toward the sun's side below the cloud, a grey wash
+  let nU = fbm3(vec3f(q + vec2f(0.0, -0.06), 0.7), 4);
+  return vec2f(cover, clamp((n - nU) * 6.0, 0.0, 1.0) * cover);
+}
+/** cloud bands: long soft streaks low in the sky (directions only) */
+fn cloudBandsAt(dirW: vec3f) -> f32 {
+  let el = asin(clamp(dirW.y, -1.0, 1.0));
+  let az = atan2(dirW.x, dirW.z);
+  let b = vnoise2(vec2f(az * 3.0, el * 70.0)) * 0.6 + vnoise2(vec2f(az * 9.0, el * 160.0)) * 0.4;
+  return smoothstep(0.55, 0.75, b) * smoothstep(0.01, 0.04, el) * (1.0 - smoothstep(0.08, 0.2, el));
+}
 
 struct VOut { @builtin(position) pos: vec4f };
 
@@ -192,10 +223,38 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let paper = F.paper.rgb * paperAt(dirW);
 
   if (depth <= 0.0) {
-    // the sky: paper, a breath of wash at the horizon, the far ranges
-    let wash = 0.02 * exp(-max(dirW.y, 0.0) * 8.0);
-    let rng = 1.0 - exp(-paintedRanges(dirW) * 2.4);
-    return vec4f(mix(paper, F.ink.rgb, max(wash, rng)), 1.0);
+    // the sky: paper, a breath of wash at the horizon (the night sky's ink at night), the far ranges, clouds
+    let night = F.water.y > 0.5;
+    let sunAng = acos(clamp(dot(dirW, F.sun.xyz), -1.0, 1.0));
+    let up = smoothstep(0.0, 0.45, dirW.y);
+    var wash = 0.02 * exp(-max(dirW.y, 0.0) * 8.0);
+    if (night) { wash = F.water.z * 0.5 * (1.0 - 0.35 * (1.0 - up)) * (1.0 - 0.6 * exp(-sunAng / 0.08)); }
+    let rngW = paintedRanges(dirW);
+    let rng = 1.0 - exp(-rngW * 2.4);
+    var cl = vec2f(0.0);
+    if (F.accent.w > 0.0) { cl = cloudsAt(dirW) * min(1.0, F.accent.w * 2.0); }
+    // clouds: their shaded undersides a soft grey wash, their lit tops paper
+    var ink = max(max(wash * (1.0 - 0.7 * cl.x), rng), 0.22 * cl.y);
+    if (F.water.w > 0.0) { ink = max(ink, 0.12 * F.water.w * cloudBandsAt(dirW)); }
+    // a low sun's halo: the sky round it left paper
+    ink *= 1.0 - F.accent.z * exp(-sunAng / 0.09);
+    var col = mix(paper, F.ink.rgb, ink);
+    var absP = vec3f(0.0);
+    // the warm sky toward the sun (sunset, dawn)
+    let hz = 1.0 - smoothstep(0.0, 0.35, dirW.y);
+    let toSun = pow(max(dot(dirW, F.sun.xyz), 0.0), 6.0);
+    if (!night) { absP += (P_ZHE * 0.3 * (0.3 + 0.7 * toSun) + P_TENG * 0.25 * toSun) * F.accent.y * hz * F.accent.x; }
+    // the sun's glow: pale gold round it, whiter at its core
+    let glowW = F.accent.z * exp(-sunAng / 0.075);
+    if (!night && F.accent.z > 0.0) { absP += (P_TENG * 0.17 + P_ZHE * 0.17) * glowW * (1.0 - 0.8 * exp(-sunAng / 0.012)) + (P_ZHE * 0.05 + P_INK * 0.03) * (1.0 - clamp(glowW * 1.5, 0.0, 1.0)); }
+    // a sky tint (blue by day, deeper toward the zenith; the clouds and the ranges keep the paper)
+    if (F.skyTint.w > 0.0) { absP += F.skyTint.rgb * F.skyTint.w * (0.25 + 0.75 * up) * (1.0 - cl.x) * (1.0 - 0.6 * rngW); }
+    col *= exp(-absP);
+    if (night) { col = nightGrade(col); }
+    // the sun (or the moon) itself: the brightest thing in the painting
+    if (F.accent.z > 0.0 && !night) { col = mix(col, vec3f(1.0, 0.985, 0.94), F.accent.z * exp(-sunAng / 0.012) * 0.9); }
+    if (night) { col = mix(col, vec3f(0.97, 0.96, 0.9), 1.0 - smoothstep(0.016, 0.02, sunAng)); col += vec3f(0.1, 0.12, 0.16) * exp(-sunAng / 0.05); }
+    return vec4f(col, 1.0);
   }
 
   let A = textureLoad(gA, p, 0);
@@ -232,6 +291,32 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_GROUND) {
     let pn = vnoise2(P.xz / 4.5 + 7.3) * 0.6 + vnoise2(P.xz / 1.6 + 2.9) * 0.4;
     ink += 0.32 * (smoothstep(0.4, 0.7, pn) - 0.2) * (1.0 - smoothstep(250.0, 700.0, dist));
+  }
+
+  // ---- the water: its own pale wash; the sun's (or the moon's) path on it, one broken column below the sun's bearing,
+  // its dashes fixed to the world (along and across that bearing), nearly whole under the sun by the far shore
+  var sunPath = 0.0;
+  if (cls == C_WATER) {
+    let wn = zoomNoise(P, footprint, 45.0, vec3f(1.3, 7.1, 2.9));
+    let MC = F.moonCol;
+    if (MC.x > 0.0) {
+      let mz = normalize(F.sun.xz + vec2f(1e-6, 0.0));
+      let dz = normalize(dirW.xz + vec2f(1e-6, 0.0));
+      let dAz = abs(atan2(mz.x * dz.y - mz.y * dz.x, dot(mz, dz)));
+      let below = max(-dirW.y, 0.0);
+      let ax = vec3f(mz.x, 0.0, mz.y);
+      let ar = vec3f(-mz.y, 0.0, mz.x);
+      let wob = zoomNoise(vec3f(dot(P, ax) * 1.7, 0.0, 3.0), footprint, 6.0, vec3f(0.0)) - 0.5;
+      let core = 1.0 - smoothstep(0.0, 1.0, dAz / (MC.y + MC.z * below) + 0.5 * wob);
+      let rows = zoomNoise(vec3f(dot(P, ar) * 0.3, 0.0, dot(P, ax) * 3.2) + vec3f(9.0), footprint, 5.0, vec3f(0.0));
+      if (F.accent.z > 0.0) {
+        let nearSun = 1.0 - smoothstep(0.0, 0.05, below);
+        sunPath = core * mix(smoothstep(0.5 - 0.15 * core, 0.6 - 0.12 * core, rows), 1.0, 0.25 + 0.6 * nearSun * core) * MC.x;
+      } else {
+        sunPath = core * smoothstep(0.56 - 0.2 * core, 0.64 - 0.16 * core, rows) * MC.x;
+      }
+    }
+    ink = F.water.x * (0.75 + 0.5 * wn) * (1.0 - min(sunPath * (1.0 + 0.4 * F.accent.z), 1.0));
   }
 
   // ---- tree crowns: clumps of foliage in the tree's own frame, each deeper underneath and paler on top, paper
@@ -398,6 +483,26 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let tintK = s3.w * (1.0 - edge) * (1.0 - 0.6 * leaf);
   let inkCol = mix(F.ink.rgb, s3.rgb, tintK);
   var col = mix(paper, inkCol, ink);
+  // colour accents of 纯水墨 (the look's `accent`): red maple, gold ginkgo, pink lotus flowers, vines; the sun's glow on
+  // the forms before it and gold on its path on the water
+  var absP = vec3f(0.0);
+  let lit = clamp(Bv.x, 0.0, 1.0);
+  if (cls == C_MAPLE) { absP += (P_ZHU * (1.0 + 0.4 * lit) + P_ZHE * 0.3) * F.accent.x; }
+  else if (cls == C_GINKGO) { absP += (P_TENG * 0.9 + P_ZHE * 0.35) * F.accent.x; }
+  else if (cls == C_IVY) { absP += (P_TENG * 0.6 + P_ZHE * 0.5) * 0.45 * F.accent.x; }
+  else if (cls == C_BLOOM) { absP += P_ZHU * 0.2 * F.accent.x; }
+  if (F.accent.z > 0.0 && F.water.y < 0.5) {
+    let sunAng = acos(clamp(dot(dirW, F.sun.xyz), -1.0, 1.0));
+    if (cls == C_WATER) { absP += (P_TENG * 0.1 + P_ZHE * 0.05) * sunPath * F.accent.z; }
+    else { absP += (P_TENG * 0.1 + P_ZHE * 0.05) * F.accent.z * exp(-sunAng / 0.035); }
+  }
+  col *= exp(-absP * (1.0 - edge * 0.5));
+  // at night: graded into the night's indigo; the moon's path on the water and the lamps keep their light
+  if (F.water.y > 0.5) {
+    col = nightGrade(col);
+    if (cls == C_WATER) { col = mix(col, vec3f(0.85, 0.88, 0.92), clamp(sunPath, 0.0, 1.0)); }
+    if (cls == C_GLOW) { col = vec3f(1.0, 0.86, 0.55); }
+  }
   // fallen petals on the ground in spring: pale pink specks, ~3 cm, scattered in drifts (world cells of 12 cm)
   if ((cls == C_GROUND || cls == C_PAVE) && F.season.x > 0.0) {
     let cell = floor(P.xz / 0.12);
