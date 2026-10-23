@@ -4,6 +4,11 @@ A WebGPU engine, in TypeScript, for walkable worlds painted as Chinese ink. Its 
 (https://linan.lapla.si). Design: `docs/ARCHITECTURE.md`; the scene files it reads: `docs/SCENE_FORMAT.md`;
 what comes next: `docs/PLAN.md`.
 
+Two painters turn the G-buffer into ink. Painter 2 (the default, `src/render/painter2.ts`) is linan's own painter, the
+one that made its approved stills, ported pass for pass: a tone from albedo × light with each look's levels baked at
+its viewpoint, its ½ and ⅛ blurs, the light on the form, brush outlines through a jump flood, where each pixel sits in
+its mass, and the washes, marks and lines of 纯水墨. Painter 1 (`?p2=0`) is Mo's first, one pass.
+
 ```
 npm run build      # dist/ (ES modules)
 npm run check      # type check
@@ -21,6 +26,8 @@ node tools/pack-scene.mjs <scene> <out>                 # (no browser) repack a 
 node tools/compare/linan-site.mjs --site <linan> --path p.json   # the same path through linan's own renderer
 node tools/compare/stack.mjs left.mp4 right.mp4 out.mp4          # two captures side by side, labelled
 node tools/site.mjs --scene <scene> [--vp 2]           # (no browser) the demo and its scenes as a static site
+node tools/gputime.mjs --q "scene=…" --vps 2,7         # GPU time per pass (stage), averaged over a few seconds
+node tools/compare/tone-levels.mjs --scene <s> --ref <dir>       # bake each look's tone levels against linan's tone
 ```
 
 In the demo: W A S D walk, Shift run, F walk / fly, mouse (double-click to lock) look, 1 … 9 and 0 the viewpoints,
