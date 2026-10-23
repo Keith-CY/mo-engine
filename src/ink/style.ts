@@ -59,16 +59,16 @@ export const DEFAULT_STYLE: InkStyle = {
     paperColor: [0.955, 0.93, 0.875], paperTexture: 0.05, inkColor: [0.08, 0.075, 0.07], lineStrength: 1,
     // (linan look 2, 苏堤: three low ranges all round, pale, a short mist fade; spring petals)
     ranges: [2.5, 1.2, 2.5, 3, 0, 0, 0.32, 0.7],
-    petals: [1, 0.9, 0.7, 0.7],
+    petals: [1.6, 0.95, 0.84, 0.84],
     layers: 3.5, pool: 0.45,
   },
   base: { wash: [0.06, 0.4, 1.4, 0.3], line: [1.0, 0.0, 0.3, 1.4], marks: [0.4, 8, MARK.GRAIN], haze: 1, tint: [0, 0, 0, 0] },
   classes: {
     // the ground a mid grey with the trees' shadows laid on it dark, in tussocks and sweeps (ink02); the grass pale,
     // drawn by its blades; the slab path paler still, its joints drawn
-    [CLS.GROUND]: { wash: [0.17, 0.14, 1.5, 0.38], line: [0.12, 0, 0.3, 1.2], marks: [0.3, 10, MARK.GRAIN] },
+    [CLS.GROUND]: { wash: [0.17, 0.14, 1.5, 0.38], line: [0.12, 0, 0.3, 1.2], marks: [0.55, 6, MARK.GRAIN] },
     [CLS.SMALL]: { wash: [0.1, 0.12, 1.4, 0.25], line: [0.35, 0, 0.3, 0.8], marks: [0.5, 5, MARK.GRASS] },
-    [CLS.PAVE]: { wash: [0.05, 0.05, 1.5, 0.25], line: [0.25, 0, 0.3, 1.0], marks: [0, 8, MARK.NONE] },
+    [CLS.PAVE]: { wash: [0.05, 0.05, 1.5, 0.08], line: [0.25, 0, 0.3, 1.0], marks: [0, 8, MARK.NONE] },
     [CLS.ROCK]: { wash: [0.1, 0.55, 1.2, 0.3], line: [0.55, 0.15, 0.75, 1.6], marks: [0.8, 6, MARK.ROCK], haze: 2.2 },
     [CLS.WATER]: { wash: [0.0, 0.05, 2.0, 0.1], line: [0, 0, 0.3, 1.0], marks: [0.0, 14, MARK.NONE] },
     // architecture: pale washes, the contours and joints drawn (界画)

@@ -30,6 +30,11 @@ async function main(): Promise<void> {
   const stats = engine.setScene(scene);
   const vp = Number(P.get('vp'));
   if (vp && scene.viewpoints.find((v) => v.id === vp)) engine.goTo(scene.viewpoints.find((v) => v.id === vp)!);
+  // ?at=x,y,z&to=x,y,z[&fov=deg]: any camera (diagnostics)
+  if (P.get('at') && P.get('to')) {
+    const at = P.get('at')!.split(',').map(Number) as [number, number, number], to = P.get('to')!.split(',').map(Number) as [number, number, number];
+    engine.goTo({ id: 0, name: 'at', position: at, target: to, fovY: Number(P.get('fov')) || 50 });
+  }
   addEventListener('keydown', (e) => {
     const n = /^Digit([1-9])$/.exec(e.code);
     if (n) { const v = scene.viewpoints[Number(n[1]) - 1]; if (v) engine.goTo(v); }

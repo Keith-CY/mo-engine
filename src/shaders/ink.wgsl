@@ -231,7 +231,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // to their mean where they would be only a few pixels)
   if (cls == C_GROUND) {
     let pn = vnoise2(P.xz / 4.5 + 7.3) * 0.6 + vnoise2(P.xz / 1.6 + 2.9) * 0.4;
-    ink += 0.34 * (smoothstep(0.4, 0.7, pn) - 0.35) * (1.0 - smoothstep(250.0, 700.0, dist));
+    ink += 0.32 * (smoothstep(0.4, 0.7, pn) - 0.2) * (1.0 - smoothstep(250.0, 700.0, dist));
   }
 
   // ---- tree crowns: clumps of foliage in the tree's own frame, each deeper underneath and paler on top, paper
