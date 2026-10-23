@@ -92,6 +92,7 @@ export class Engine {
     st.look.clouds = num('clouds') ?? 0; st.look.cloudBands = num('cloudBands') ?? 0;
     st.look.skyTint = v4('skyTint'); st.look.moonCol = v4('moonCol');
     st.look.waterBase = num('waterBase') ?? num('water') ?? 0.05;
+    st.look.waterRefl = Array.isArray(ink.waterRefl) ? [(ink.waterRefl as number[])[0], (ink.waterRefl as number[])[1]] : [1, 0];
     st.look.night = !!(L.night || num('night')); st.look.skyInk = num('sky') ?? 0;
     this.renderer.setStyle(st);
   }

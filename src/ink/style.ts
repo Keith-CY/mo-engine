@@ -59,8 +59,9 @@ export interface Look {
   skyTint?: [number, number, number, number];
   /** the sun's or moon's path on the water: amount, half width (rad), widening per rad below the horizon, dashes */
   moonCol?: [number, number, number, number];
-  /** the water's own wash */
+  /** the water's own wash, and the shore's reflection on it: gain (0 none), fade (screen px at 1664 wide; 0 default) */
   waterBase?: number;
+  waterRefl?: [number, number];
   /** a night painting: the sky's ink */
   night?: boolean;
   skyInk?: number;

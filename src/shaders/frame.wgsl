@@ -35,6 +35,7 @@ struct Frame {
   skyTint: vec4f,         // a sky tint (absorbance rgb, amount): blue by day, the night's indigo
   moonCol: vec4f,         // the sun's or moon's path on the water: amount, half width (rad), widening per rad below, dashes
   water: vec4f,           // the water's own wash, night (1), the night sky's ink, cloud bands
+  refl: vec4f,            // the shore's reflection on the water: gain (0 none), fade (screen px at 1664 wide, 0: the default)
 };
 
 const CASCADES = 2u;

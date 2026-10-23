@@ -18,7 +18,7 @@ import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 
-const FRAME_FLOATS = 256;
+const FRAME_FLOATS = 260;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -179,6 +179,14 @@ export class Renderer {
       fullscreen('mo capture', PRESENT, 'rgba8unorm'),
     ]);
     this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
+  }
+
+  /** the present pass's inputs: the resolved painting, and the G-buffer for the water's reflections */
+  private presentBindGroup(pipe: GPURenderPipeline, t: Targets, k: number): GPUBindGroup {
+    return this.device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: t.hist[k].createView() }, { binding: 1, resource: { buffer: this.frameBuf } },
+      { binding: 2, resource: t.a.createView() }, { binding: 3, resource: t.depth.createView() }, { binding: 4, resource: this.sampler },
+    ] });
   }
 
   /** the painter's inputs: the G-buffer, the style table and the instances (for the trees' own frames) */
@@ -357,8 +365,8 @@ export class Renderer {
         { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: t.paint.createView() },
         { binding: 2, resource: t.hist[1 - k].createView() }, { binding: 3, resource: t.depth.createView() }, { binding: 4, resource: this.sampler },
       ] })),
-      present: [0, 1].map((k) => d.createBindGroup({ layout: P.present.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.hist[k].createView() }] })),
-      capture: [0, 1].map((k) => d.createBindGroup({ layout: P.capture.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.hist[k].createView() }] })),
+      present: [0, 1].map((k) => this.presentBindGroup(P.present, t, k)),
+      capture: [0, 1].map((k) => this.presentBindGroup(P.capture, t, k)),
     };
     this.frameNo = 0;
     return t;
@@ -412,6 +420,7 @@ export class Renderer {
     f.set(L.skyTint ?? [0, 0, 0, 0], 244);
     f.set(L.moonCol ?? [0, 0, 0, 0], 248);
     f.set([L.waterBase ?? 0.05, L.night ? 1 : 0, L.skyInk ?? 0, L.cloudBands ?? 0], 252);
+    f.set([...(L.waterRefl ?? [1, 0]), 0, 0], 256);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];
