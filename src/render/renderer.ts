@@ -192,6 +192,37 @@ export class Renderer {
     ] });
   }
   private noInstances?: GPUBuffer;
+  /** every slot's indirect draw, recorded once (the counts live on the GPU, so the list never changes): a city's
+   *  thousands of draws cost the CPU nothing per frame. Made again when a bind group they hold changes */
+  private bundles?: { gbuffer: GPURenderBundle; shadow: GPURenderBundle[] };
+
+  private recordBundles(s: GpuScene): { gbuffer: GPURenderBundle; shadow: GPURenderBundle[] } {
+    const d = this.device;
+    const gb = d.createRenderBundleEncoder({ label: 'mo gbuffer draws', colorFormats: ['rgba16float', 'rgba16float', 'rgba32uint'], depthStencilFormat: 'depth32float' });
+    gb.setPipeline(this.pipes.gbuffer);
+    gb.setBindGroup(0, this.frameBG);
+    gb.setBindGroup(1, this.sceneBG!);
+    gb.setVertexBuffer(0, s.vertices);
+    gb.setIndexBuffer(s.indices, 'uint32');
+    for (let i = 0; i < s.slots.length; i++) {
+      gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]);
+      gb.drawIndexedIndirect(s.args, i * 20);
+    }
+    const shadow = CASCADE_RADII.map((_, k) => {
+      const e = d.createRenderBundleEncoder({ label: `mo shadow ${k} draws`, colorFormats: [], depthStencilFormat: 'depth32float' });
+      e.setPipeline(this.pipes.shadow);
+      e.setBindGroup(0, this.shadowFrameBG, [k * 256]);
+      e.setBindGroup(1, this.sceneBG!);
+      e.setVertexBuffer(0, s.vertices);
+      e.setIndexBuffer(s.indices, 'uint32');
+      for (let i = 0; i < s.slots.length; i++) {
+        e.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]);
+        e.drawIndexedIndirect(s.args, ((k + 1) * s.slots.length + i) * 20);
+      }
+      return e.finish();
+    });
+    return { gbuffer: gb.finish(), shadow };
+  }
 
   /** the bind groups that hold the alpha mask (made again when a scene brings its own) */
   private bindFrame(): void {
@@ -217,6 +248,7 @@ export class Renderer {
       { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: this.shadowPassBuf, size: 16 } },
       { binding: 2, resource: alpha }, { binding: 3, resource: this.alphaSampler },
     ] });
+    this.bundles = undefined;
   }
 
   /** the scene's slab paths: up to 4 centre lines of up to 8 points, with their arc lengths */
@@ -301,6 +333,7 @@ export class Renderer {
     const pass = new Uint32Array(CASCADE_RADII.length * 64);
     CASCADE_RADII.forEach((_, k) => pass.set([k, (k + 1) * s.visibleTotal, 0, 0], k * 64));
     d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
+    this.bundles = undefined;
     this.frameNo = 0;
     return { slots: s.slots.length, instances: s.instanceCount, triangles: s.triangles };
   }
@@ -432,15 +465,8 @@ export class Renderer {
         depthStencilAttachment: { view: this.shadowMap.createView({ dimension: '2d', baseArrayLayer: k, arrayLayerCount: 1 }), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
       });
       if (s && this.sceneBG && this.drawBG) {
-        sp.setPipeline(this.pipes.shadow);
-        sp.setBindGroup(0, this.shadowFrameBG, [k * 256]);
-        sp.setBindGroup(1, this.sceneBG);
-        sp.setVertexBuffer(0, s.vertices);
-        sp.setIndexBuffer(s.indices, 'uint32');
-        for (let i = 0; i < s.slots.length; i++) {
-          sp.setBindGroup(2, this.drawBG, [i * DRAW_STRIDE]);
-          sp.drawIndexedIndirect(s.args, ((k + 1) * s.slots.length + i) * 20);
-        }
+        this.bundles ??= this.recordBundles(s);
+        sp.executeBundles([this.bundles.shadow[k]]);
       }
       sp.end();
     }
@@ -454,15 +480,8 @@ export class Renderer {
       depthStencilAttachment: { view: t.depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 0 },
     });
     if (s && this.sceneBG && this.drawBG) {
-      g.setPipeline(this.pipes.gbuffer);
-      g.setBindGroup(0, this.frameBG);
-      g.setBindGroup(1, this.sceneBG);
-      g.setVertexBuffer(0, s.vertices);
-      g.setIndexBuffer(s.indices, 'uint32');
-      for (let i = 0; i < s.slots.length; i++) {
-        g.setBindGroup(2, this.drawBG, [i * DRAW_STRIDE]);
-        g.drawIndexedIndirect(s.args, i * 20);
-      }
+      this.bundles ??= this.recordBundles(s);
+      g.executeBundles([this.bundles.gbuffer]);
     }
     g.end();
     const pass = (label: string, view: GPUTextureView, pipe: GPURenderPipeline, bg: GPUBindGroup) => {
