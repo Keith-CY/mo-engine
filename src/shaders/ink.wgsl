@@ -305,6 +305,23 @@ fn fs(v: VOut) -> @location(0) vec4f {
   }
   ink = max(ink, mark * s2.x);
 
+  // ---- tile rows on a roof: lines running down each roof plane, a row every 0.3 m across the slope, the spacing
+  // doubled as they get small (never closer than ~3 px: no moiré), broken along their length
+  if (cls == 4u) {
+    let tA0 = cross(nW, vec3f(0.0, 1.0, 0.0));
+    if (dot(tA0, tA0) > 0.02) {
+      let tA = normalize(tA0);
+      let u = dot(P, tA);
+      let px = max(footprint, 1e-4);
+      let S = 0.3 * exp2(ceil(log2(max(3.2 * px / 0.3, 1.0))));
+      let dl = abs(fract(u / S) - 0.5) * S / px;
+      let along = dot(P, normalize(cross(tA, nW)));
+      let brk = smoothstep(0.3, 0.55, vnoise2(vec2f(floor(u / S) * 3.7, along / max(px * 25.0, 0.2))));
+      let tiles = (1.0 - smoothstep(0.35 - 0.2, 0.35 + 0.7, abs(dl - S / px * 0.5))) * brk * (0.55 + 0.45 * shade) * (1.0 - smoothstep(150.0, 450.0, dist));
+      ink += tiles * 0.3;
+    }
+  }
+
   // ---- the ground in tussocks (clumps ~0.45 m: lit tops, dark gaps; their mean once smaller than a few pixels) and
   // broad-brush sweeps (horizontal, a little uneven)
   if (cls == C_GROUND || cls == C_SMALL) {
