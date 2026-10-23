@@ -27,6 +27,10 @@ async function main(): Promise<void> {
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
   // the still-match painter (linan's, pass for pass) unless ?p2=0 asks for Mo's first; ?p2dbg=n its debug views
   engine.renderer.painter = P.get('p2') === '0' ? 1 : 2;
+  // ?scale=0.8: a fixed render scale (the painting's size over the screen's); otherwise it follows the frame rate (not
+  // under automation: the tools' screenshots and captures keep the full size)
+  if (navigator.webdriver) engine.adaptive = false;
+  if (P.get('scale')) { engine.adaptive = false; engine.renderScale = Number(P.get('scale')); engine.resize(); }
   if (P.get('p2dbg')) engine.renderer.p2.debug = Number(P.get('p2dbg'));
   // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
   if (P.get('paper') === '0' || P.get('marks') === '0' || P.get('lines') === '0') {
@@ -67,7 +71,7 @@ async function main(): Promise<void> {
     const mean = ft.reduce((a, b) => a + b, 0) / Math.max(1, ft.length);
     const p = e.camera.position;
     hud.textContent = `${scene.name}${engine.look ? ' · ' + engine.look.name : ''} · ${stats.instances} instances · ${(stats.triangles / 1e6).toFixed(1)} M tris (all at level 0+)\n` +
-      `${(1000 / mean).toFixed(0)} fps · ${e.walker.mode} · ${p.map((x) => x.toFixed(0)).join(' ')}\n` +
+      `${(1000 / mean).toFixed(0)} fps · scale ${e.renderScale} · ${e.walker.mode} · ${p.map((x) => x.toFixed(0)).join(' ')}\n` +
       `GPU ms ${Object.entries(e.renderer.gpuTimes).map(([k, v]) => `${k} ${v}`).join(' · ')}`;
   });
   engine.start();

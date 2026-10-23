@@ -23,12 +23,16 @@ fn lum(c: vec3f) -> f32 { return dot(c, vec3f(0.3, 0.55, 0.15)); }
 
 @fragment
 fn fs(v: VOut) -> @location(0) vec4f {
-  let p = vec2i(v.pos.xy);
+  // (the painting is made at the render scale, F.layering.w: smaller than the screen it is laid on, upscaled)
+  let scale = F.layering.w;
+  let ps = v.pos.xy * scale;
+  let p = vec2i(ps);
+  let uv = ps * F.viewport.zw;
   var c = textureLoad(src, p, 0).rgb;
+  if (scale < 0.999) { c = textureSampleLevel(src, lin, uv, 0.0).rgb; }
   let A = textureLoad(gA, p, 0);
   if (u32(A.w + 0.5) != 3u || F.refl.x <= 0.0) { return vec4f(c, 1.0); }
   let size = vec2i(F.viewport.xy);
-  let uv = v.pos.xy * F.viewport.zw;
   let depth = textureLoad(gDepth, p, 0);
   let q = F.invViewProj * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
   let rel = q.xyz / q.w;

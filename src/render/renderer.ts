@@ -93,6 +93,8 @@ export class Renderer {
   benchSkip = new Set<string>();
   /** G-buffer work left out (benchmarks only, bits): 1 the surface functions, 2 the cast shadow, 4 the alpha test */
   benchFlags = 0;
+  /** the painting's size over the screen's (the engine's render scale): the present pass upscales it */
+  presentScale = 1;
   /** benchmarks: draw the shadow cascades every frame, as a walking eye makes them */
   benchShadowsAlways = false;
   /** benchmarks: the G-buffer compiled without discard (foliage drawn whole); rebuildGbuffer() after a change */
@@ -500,7 +502,7 @@ export class Renderer {
     const rg = L.ranges ?? [0, 0, 0, 0, 0, 0, 0, 0], deg = Math.PI / 180;
     f.set([rg[0] * deg, rg[1] * deg, rg[2] * deg, rg[3], rg[4] * deg, rg[5] * deg, rg[6], rg[7] * deg], 204);
     f.set(L.petals ?? [0, 0, 0, 0], 212);
-    f.set([L.layers ?? 0, L.pool ?? 0, this.benchFlags, 0], 216);
+    f.set([L.layers ?? 0, L.pool ?? 0, this.benchFlags, this.presentScale], 216);
     f.set([...(L.shotPos ?? [0, 0, 0]), L.groundY ?? 0], 220);
     for (let k = 0; k < 3; k++) f.set(L.bands?.[k] ?? [0, 0, 0, 0], 224 + k * 4);
     f.set(L.mist ?? [0, 0, 0, 0], 236);

@@ -131,11 +131,20 @@ export class Engine {
     return Number.isFinite(g) && p[1] - g > 4 ? 'fly' : 'walk';
   }
 
+  /** the painting's size over the canvas's: lowered a step at a time while frames run long (only with the eye at rest,
+   *  never mid-turn), raised again when there is room; `adaptive` false holds it */
+  renderScale = 1;
+  adaptive = true;
+  private restMs = 0;
+  private lastScaleChange = 0;
+
   resize(): void {
     const w = Math.max(2, Math.round(this.canvas.clientWidth * this.pixelRatio));
     const h = Math.max(2, Math.round(this.canvas.clientHeight * this.pixelRatio));
     this.canvas.width = w; this.canvas.height = h;
-    this.camera.width = w; this.camera.height = h; this.camera.aspect = w / h;
+    const rw = Math.max(2, Math.round(w * this.renderScale)), rh = Math.max(2, Math.round(h * this.renderScale));
+    this.camera.width = rw; this.camera.height = rh; this.camera.aspect = rw / rh;
+    this.renderer.presentScale = rw / w;
     this.fitFov();
   }
 
@@ -150,9 +159,26 @@ export class Engine {
 
   onFrame(f: (e: Engine) => void): void { this.listeners.push(f); }
 
+  /** the render scale follows the frame rate: a step down (0.1, to 0.6) when the last 90 frames averaged over 19 ms, a
+   *  step up when under 12.5 ms — decided only after the eye has rested half a second, at most every 2 s */
+  private adapt(moved: boolean): void {
+    if (!this.adaptive || this.frameTimes.length < 90) return;
+    this.restMs = moved ? 0 : this.restMs + this.clock.dt * 1000;
+    const now = performance.now();
+    if (this.restMs < 500 || now - this.lastScaleChange < 2000) return;
+    const ft = this.frameTimes.slice(-90), mean = ft.reduce((a, b) => a + b, 0) / ft.length;
+    const next = mean > 19 ? Math.max(0.6, this.renderScale - 0.1) : mean < 12.5 ? Math.min(1, this.renderScale + 0.1) : this.renderScale;
+    if (Math.abs(next - this.renderScale) < 1e-3) return;
+    this.renderScale = +next.toFixed(2);
+    this.lastScaleChange = now;
+    this.frameTimes.length = 0;
+    this.resize();
+  }
+
   /** one frame: the controller moves the eye by the clock's dt, the renderer draws */
   step(capture = false): void {
-    this.walker.update(this.clock.dt);
+    const moved = this.walker.update(this.clock.dt);
+    if (!capture) this.adapt(moved);
     this.renderer.render(this.camera, this.clock.now / 1000, capture);
     for (const f of this.listeners) f(this);
   }

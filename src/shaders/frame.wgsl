@@ -27,7 +27,7 @@ struct Frame {
   ranges: vec4f,          // far ranges painted on the sky: base elevation, step, ridge amplitude (rad), count
   rangesB: vec4f,         // … azimuth centre, half width (rad, 0: all round), ink, mist fade (rad)
   season: vec4f,          // fallen petals on the ground (amount), their colour (rgb)
-  layering: vec4f,        // wash layers (墨分五色: 0 off), dark rims where a layer ends (水渍), bench flags, unused
+  layering: vec4f,        // wash layers (墨分五色: 0 off), dark rims where a layer ends (水渍), bench flags, render scale
   shotPos: vec4f,         // the look's own viewpoint (xyz) its mist bands are measured from, the ground height there
   bands: array<vec4f, 3>, // 留白: mist lying low at a distance from shotPos: distance, half width, amount, ceiling (m)
   mist: vec4f,            // a band of mist below a height: from y0, full below y1 … (y0, y1, beyond this distance, amount)
