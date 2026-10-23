@@ -7,7 +7,8 @@ import { bufferFrom } from '../gpu/device';
 import { INSTANCE_BYTES, VCLASS_ALPHA, VCLASS_OWN, type SceneData } from './types';
 
 /** interleaved vertex (4-byte words): position (3), normal (3), albedo luminance (1), uv (2), class word (1, u32: bits
- *  0–15 the class of its triangles or 0xffff for the mesh's, bit 16 alpha-tested) */
+ *  0–15 the class of its triangles or 0xffff for the mesh's, bit 16 alpha-tested, bit 17 paving from the paths,
+ *  bits 24–31 the surface pattern) */
 export const VERTEX_FLOATS = 10;
 /** passes the culling fills: the view, then each shadow cascade (src/shaders/frame.wgsl CASCADES) */
 export const PASSES = 3;
@@ -65,7 +66,7 @@ export class GpuScene {
         vdata[o + 3] = m.normals[j * 3]; vdata[o + 4] = m.normals[j * 3 + 1]; vdata[o + 5] = m.normals[j * 3 + 2];
         vdata[o + 6] = m.tones ? m.tones[j] : m.tone;
         if (m.uvs) { vdata[o + 7] = m.uvs[j * 2]; vdata[o + 8] = m.uvs[j * 2 + 1]; }
-        vwords[o + 9] = m.vclass ? m.vclass[j] : VCLASS_OWN | (m.mask?.all ? VCLASS_ALPHA : 0);
+        vwords[o + 9] = (m.vclass ? m.vclass[j] : VCLASS_OWN | (m.mask?.all ? VCLASS_ALPHA : 0)) | ((m.patterns ? m.patterns[j] & 0xff : 0) << 24);
       }
       idata.set(m.indices, k);
       v += n; k += m.indices.length;
@@ -82,6 +83,7 @@ export class GpuScene {
     let visibleTotal = 0;
     scene.batches.forEach((b, bi) => {
       const levels = 'lodGroup' in b ? scene.lodGroups[b.lodGroup].levels : [{ mesh: b.mesh, to: 1e9 }];
+      const shadowFrom = 'lodGroup' in b ? Math.min(Math.max(0, scene.lodGroups[b.lodGroup].shadowFrom ?? 0), levels.length - 1) : 0;
       if (levels.length > 4) throw new Error(`[mo] a LOD group has ${levels.length} levels (4 at most)`);
       const first = this.slots.length;
       for (const [li, l] of levels.entries()) {
@@ -95,7 +97,7 @@ export class GpuScene {
       }
       batchOf.fill(bi, b.first, b.first + b.count);
       const m0 = scene.meshes[levels[0].mesh];
-      bu.set([first, levels.length, b.first, b.count], bi * 12);
+      bu.set([first, levels.length | (shadowFrom << 8), b.first, b.count], bi * 12);
       bf.set([...levels.map((l) => l.to), ...Array(4 - levels.length).fill(1e9)], bi * 12 + 4);
       bf.set([...m0.center, m0.radius], bi * 12 + 8);
     });

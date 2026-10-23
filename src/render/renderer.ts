@@ -18,7 +18,7 @@ import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 
-const FRAME_FLOATS = 204;
+const FRAME_FLOATS = 220;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -79,7 +79,8 @@ export class Renderer {
   /** LOD distance scale (> 1: coarser sooner) and hysteresis */
   lodScale = 1;
   lodHysteresis = 0.08;
-  /** 0 the painting; 1 classes, 2 cast shadow (red) / sun (green) / sky (blue), 3 normals */
+  /** 0 the painting; 1 classes, 2 cast shadow (red) / sun (green) / sky (blue), 3 normals, 4 joints, 5 as 2 with the
+   *  shadow casters' alpha cut off */
   debugView = 0;
   /** frames over which a change of LOD level dissolves (0: at once) */
   lodFadeFrames = 24;
@@ -117,7 +118,7 @@ export class Renderer {
       { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
     ] });
     const shadowFrame = d.createBindGroupLayout({ label: 'mo shadow frame layout', entries: [
-      { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+      { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
@@ -179,6 +180,18 @@ export class Renderer {
     ]);
     this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
   }
+
+  /** the painter's inputs: the G-buffer, the style table and the instances (for the trees' own frames) */
+  private inkBindGroup(t: Targets): GPUBindGroup {
+    const d = this.device;
+    const inst = this.scene?.instances ?? (this.noInstances ??= bufferFrom(d, new Uint32Array(16), GPUBufferUsage.STORAGE, 'mo instances (none)'));
+    return d.createBindGroup({ layout: this.pipes.ink.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: t.a.createView() }, { binding: 2, resource: t.b.createView() },
+      { binding: 3, resource: t.c.createView() }, { binding: 4, resource: t.depth.createView() }, { binding: 5, resource: { buffer: this.styleBuf } },
+      { binding: 6, resource: { buffer: inst } },
+    ] });
+  }
+  private noInstances?: GPUBuffer;
 
   /** the bind groups that hold the alpha mask (made again when a scene brings its own) */
   private bindFrame(): void {
@@ -264,6 +277,7 @@ export class Renderer {
     const s = (this.scene = new GpuScene(d, data));
     this.uploadPave(data);
     this.uploadPaths(data);
+    if (this.targets && this.passBGs) this.passBGs.ink = this.inkBindGroup(this.targets);
     this.uploadAlpha(data);
     this.bindFrame();
     this.sceneBG = d.createBindGroup({ layout: this.layouts.scene, entries: [
@@ -305,10 +319,7 @@ export class Renderer {
     this.targets = t;
     const P = this.pipes;
     this.passBGs = {
-      ink: d.createBindGroup({ layout: P.ink.getBindGroupLayout(0), entries: [
-        { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: t.a.createView() }, { binding: 2, resource: t.b.createView() },
-        { binding: 3, resource: t.c.createView() }, { binding: 4, resource: t.depth.createView() }, { binding: 5, resource: { buffer: this.styleBuf } },
-      ] }),
+      ink: this.inkBindGroup(t),
       resolve: [0, 1].map((k) => d.createBindGroup({ layout: P.resolve.getBindGroupLayout(0), entries: [
         { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: t.paint.createView() },
         { binding: 2, resource: t.hist[1 - k].createView() }, { binding: 3, resource: t.depth.createView() }, { binding: 4, resource: this.sampler },
@@ -357,6 +368,10 @@ export class Renderer {
     this.writeLight(f, e);
     f.set([this.scene?.slots.length ?? 0, this.scene?.visibleTotal ?? 0, CASCADE_RADII.length, this.debugView], 196);
     f.set(this.paveField, 200);
+    const rg = L.ranges ?? [0, 0, 0, 0, 0, 0, 0, 0], deg = Math.PI / 180;
+    f.set([rg[0] * deg, rg[1] * deg, rg[2] * deg, rg[3], rg[4] * deg, rg[5] * deg, rg[6], rg[7] * deg], 204);
+    f.set(L.petals ?? [0, 0, 0, 0], 212);
+    f.set([L.layers ?? 0, L.pool ?? 0, 0, 0], 216);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];

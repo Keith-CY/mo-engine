@@ -3,7 +3,7 @@ import type { Batch, Heightfield, MeshData, SceneData } from './types';
 interface AttrRef { offset: number; format: string }
 interface MeshJson {
   name: string; class: number; vertexCount: number; indexCount: number;
-  attributes: { position: AttrRef; normal: AttrRef; uv?: AttrRef; tone?: AttrRef; class?: AttrRef };
+  attributes: { position: AttrRef; normal: AttrRef; uv?: AttrRef; tone?: AttrRef; class?: AttrRef; pattern?: AttrRef };
   index: AttrRef; bounds: { center: [number, number, number]; radius: number }; tone?: number;
   mask?: { texture: number; cutoff: number; all?: boolean };
 }
@@ -54,6 +54,7 @@ export async function loadMoScene(base: string | URL): Promise<SceneData> {
       tones: a.tone ? f32(a.tone, m.vertexCount) : undefined,
       uvs: a.uv ? f32(a.uv, m.vertexCount * 2) : undefined,
       vclass: a.class ? new Uint32Array(geo, a.class.offset, m.vertexCount) : undefined,
+      patterns: a.pattern && a.uv ? new Uint32Array(geo, a.pattern.offset, m.vertexCount) : undefined,
       mask: m.mask ? { texture: m.mask.texture, cutoff: m.mask.cutoff, all: !!m.mask.all } : undefined,
       tone: m.tone ?? 0.5,
       indices: new Uint32Array(geo, m.index.offset, m.indexCount),

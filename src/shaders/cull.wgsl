@@ -5,7 +5,7 @@
 // instances out of view, so turning the head never changes a level (only walking does). A visible instance is
 // appended to the list of its (mesh, level) slot; one indirect draw per slot draws the list.
 struct Batch {
-  info: vec4u,   // first slot, levels, first instance, instance count
+  info: vec4u,   // first slot, levels (bits 0–7) and the finest level casting shadows (8–15), first instance, count
   to: vec4f,     // each level is used up to this distance (m)
   bound: vec4f,  // the level-0 mesh's bounding sphere in its own space (centre, radius)
 };
@@ -37,7 +37,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let d = max(0.0, length(c) - r) * F.lod.z;
 
   // the level, with hysteresis
-  let levels = B.info.y;
+  let levels = B.info.y & 0xffu;
   let h = F.lod.y;
   let st = lodUnpack(lodState[i]);
   let old = st.level;
@@ -58,8 +58,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   lodState[i] = lvl | (prev << 8u) | (start << 16u);
   if (lvl >= levels && !fading) { return; }
 
-  // (the shadow casters take the level that stays, or the one leaving when none stays)
+  // (the shadow casters take the level that stays, or the one leaving when none stays, but no finer than the group's
+  // shadowFrom)
   let slot = B.info.x + select(prev, lvl, lvl < levels);
+  let shadowSlot = B.info.x + max(select(prev, lvl, lvl < levels), min(B.info.y >> 8u, levels - 1u));
   let slots = u32(F.counts.x);
   let passLen = u32(F.counts.y);
 
@@ -69,9 +71,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     for (var k = 0u; k < CASCADES; k++) {
       let b = F.shadowBox[k];
       if (abs(lp.x - b.x) < b.z + r && abs(lp.y - b.y) < b.z + r && abs(lp.z) < b.w + r) {
-        let s = (k + 1u) * slots + slot;
+        let s = (k + 1u) * slots + shadowSlot;
         let n = atomicAdd(&args[s * 5u + 1u], 1u);
-        visible[(k + 1u) * passLen + slotBase[slot] + n] = i;
+        visible[(k + 1u) * passLen + slotBase[shadowSlot] + n] = i;
       }
     }
   }

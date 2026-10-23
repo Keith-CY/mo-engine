@@ -36,5 +36,6 @@ fn vs(@location(0) p: vec3f, @location(1) uv: vec2f, @location(2) vcls: u32, @bu
 @fragment
 fn fs(v: VOut) {
   let a = textureSample(alphaTex, alphaSamp, v.uv).r;
-  if (v.alpha == 1u && a < D.cutoff) { discard; }
+  // (debug view 5: casters without their alpha cut)
+  if (v.alpha == 1u && a < D.cutoff && u32(F.counts.w + 0.5) != 5u) { discard; }
 }

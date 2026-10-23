@@ -111,6 +111,9 @@ A scene may add these; a scene without them is painted from mesh and terrain cla
   (world X, Z, up to 8 points, up to 4 paths): the ground within `halfWidth` of the line and higher than `crown`
   metres is paving, laid in courses `slab` metres long. Where a scene has paths they decide the paving (an exact edge at
   any distance); otherwise the class map does.
+* **`lodGroups[].shadowFrom`**: the finest level that casts the sun's shadow (default 0); an instance drawn at a
+  finer level casts through this one (a tree whose finest level is thin alpha-tested strands casts through its crown
+  bodies).
 * **`viewpoints[].fitAspect`**: `fovY` holds at this aspect and wider; a narrower screen widens it to keep the same
   horizontal field.
 

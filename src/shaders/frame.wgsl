@@ -24,6 +24,10 @@ struct Frame {
   shadowBox: array<vec4f, 2>,  // each cascade in light space, eye-relative: centre (xy), half size, depth half range
   counts: vec4f,          // slots, visible-list length per pass, cascades, debug view (0 the painting)
   paveField: vec4f,       // the paving map: world origin (x, z), 1 / its extent (x, z)
+  ranges: vec4f,          // far ranges painted on the sky: base elevation, step, ridge amplitude (rad), count
+  rangesB: vec4f,         // … azimuth centre, half width (rad, 0: all round), ink, mist fade (rad)
+  season: vec4f,          // fallen petals on the ground (amount), their colour (rgb)
+  layering: vec4f,        // wash layers (墨分五色: 0 off), dark rims where a layer ends (水渍), unused, unused
 };
 
 const CASCADES = 2u;

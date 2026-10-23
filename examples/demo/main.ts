@@ -25,6 +25,8 @@ async function main(): Promise<void> {
     if (P.get('marks') === '0') { st.base.marks = [0, st.base.marks[1], st.base.marks[2]]; for (const c of Object.values(st.classes)) if (c?.marks) c.marks = [0, c.marks[1], c.marks[2]]; }
     engine.renderer.setStyle(st);
   }
+  // ?sun=x,y,z: the direction towards the sun (diagnostics)
+  if (P.get('sun')) { const v = P.get('sun')!.split(',').map(Number); const l = Math.hypot(...v); scene.sun = [v[0] / l, v[1] / l, v[2] / l]; }
   const stats = engine.setScene(scene);
   const vp = Number(P.get('vp'));
   if (vp && scene.viewpoints.find((v) => v.id === vp)) engine.goTo(scene.viewpoints.find((v) => v.id === vp)!);

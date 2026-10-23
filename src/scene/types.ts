@@ -12,6 +12,8 @@ export interface MeshData {
   uvs?: Float32Array;
   /** per vertex: bits 0–15 the class of its triangles (0xffff: the mesh's), bit 16 alpha-tested */
   vclass?: Uint32Array;
+  /** per vertex: the surface pattern its joints are drawn from (PATTERN), read off the metric uv */
+  patterns?: Uint32Array;
   /** the alpha mask of its alpha-tested triangles (`all`: every triangle, when there is no vclass) */
   mask?: { texture: number; cutoff: number; all: boolean };
   tone: number;
@@ -30,6 +32,9 @@ export interface LodLevel {
 export interface LodGroup {
   name: string;
   levels: LodLevel[];
+  /** the finest level that casts the sun's shadow (default 0): an instance drawn finer casts through this level (a
+   *  tree's crown bodies, where its finest level is thin alpha-tested strands) */
+  shadowFrom?: number;
 }
 
 export type Batch = { mesh: number; first: number; count: number } | { lodGroup: number; first: number; count: number };
@@ -90,6 +95,8 @@ export const CLASS_OWN = 0xffffffff;
 export const FLAG_SHADOW = 1, FLAG_TWO_SIDED = 2, FLAG_WATER = 4;
 /** vclass: the mesh's own class (bits 0–15), alpha-tested (bit 16) */
 export const VCLASS_OWN = 0xffff, VCLASS_ALPHA = 0x10000;
+/** surface patterns (docs/SCENE_FORMAT.md): the joints the G-buffer draws from a mesh's metric uv */
+export const PATTERN = { NONE: 0, ASHLAR: 1, WALL: 2, CURB: 3, VAULT: 4, SLABS: 5, STEPS: 6, VOUSSOIRS: 7, BRICK: 8 } as const;
 /** vclass bit 17: ground whose class is PAVE where its uv.x (a paving weight, interpolated) passes 0.5, else GROUND */
 export const VCLASS_PAVE_BLEND = 0x20000;
 

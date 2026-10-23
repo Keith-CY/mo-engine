@@ -7,7 +7,7 @@
 import { CLS } from '../scene/types';
 
 /** what a class's marks are (src/shaders/ink.wgsl) */
-export const MARK = { NONE: 0, GRAIN: 1, LEAF: 2, VEIL: 3, GRASS: 4, PAVE: 5, ROCK: 6, MASONRY: 7 } as const;
+export const MARK = { NONE: 0, GRAIN: 1, LEAF: 2, VEIL: 3, GRASS: 4, PAVE: 5, ROCK: 6, BLOSSOM: 8 } as const;
 
 export interface ClassStyle {
   /** ink = base + gain · (1 − value)^gamma + shadow · (in the sun's shadow), value = light × albedo */
@@ -33,6 +33,14 @@ export interface Look {
   paperTexture: number;
   inkColor: [number, number, number];
   lineStrength: number;
+  /** far ranges painted on the sky (degrees): base elevation, step, ridge amplitude, count, azimuth centre, half width
+   *  (0: all round), ink, mist fade */
+  ranges?: [number, number, number, number, number, number, number, number];
+  /** fallen petals on the ground: amount, colour (rgb) */
+  petals?: [number, number, number, number];
+  /** the wash laid in this many layers (墨分五色; 0: smooth), and the dark rim where a layer ends (水渍) */
+  layers?: number;
+  pool?: number;
 }
 
 export interface InkStyle {
@@ -48,31 +56,39 @@ const ARCH: Partial<ClassStyle> = { line: [0.8, 0.6, 0.22, 1.0] };
 export const DEFAULT_STYLE: InkStyle = {
   look: {
     hazeDistance: 1400, skyLight: 0.5, sunLight: 0.65, paperDrift: 50,
-    paperColor: [0.94, 0.91, 0.84], paperTexture: 0.05, inkColor: [0.08, 0.075, 0.07], lineStrength: 1,
+    paperColor: [0.955, 0.93, 0.875], paperTexture: 0.05, inkColor: [0.08, 0.075, 0.07], lineStrength: 1,
+    // (linan look 2, 苏堤: three low ranges all round, pale, a short mist fade; spring petals)
+    ranges: [2.5, 1.2, 2.5, 3, 0, 0, 0.32, 0.7],
+    petals: [1, 0.9, 0.7, 0.7],
+    layers: 3.5, pool: 0.45,
   },
   base: { wash: [0.06, 0.4, 1.4, 0.3], line: [1.0, 0.0, 0.3, 1.4], marks: [0.4, 8, MARK.GRAIN], haze: 1, tint: [0, 0, 0, 0] },
   classes: {
-    // the ground pale in the sun, the trees' shadows laid on it dark (ink02)
-    [CLS.GROUND]: { wash: [0.03, 0.16, 1.5, 0.6], line: [0.12, 0, 0.3, 1.2], marks: [0.45, 10, MARK.GRAIN] },
-    [CLS.SMALL]: { wash: [0.08, 0.22, 1.3, 0.5], line: [0.04, 0, 0.3, 0.8], marks: [0.85, 5, MARK.GRASS] },
-    [CLS.PAVE]: { wash: [0.02, 0.05, 1.5, 0.3], line: [0.25, 0, 0.3, 1.0], marks: [0.55, 8, MARK.PAVE] },
+    // the ground a mid grey with the trees' shadows laid on it dark, in tussocks and sweeps (ink02); the grass pale,
+    // drawn by its blades; the slab path paler still, its joints drawn
+    [CLS.GROUND]: { wash: [0.17, 0.14, 1.5, 0.38], line: [0.12, 0, 0.3, 1.2], marks: [0.3, 10, MARK.GRAIN] },
+    [CLS.SMALL]: { wash: [0.1, 0.12, 1.4, 0.25], line: [0.35, 0, 0.3, 0.8], marks: [0.5, 5, MARK.GRASS] },
+    [CLS.PAVE]: { wash: [0.05, 0.05, 1.5, 0.25], line: [0.25, 0, 0.3, 1.0], marks: [0, 8, MARK.NONE] },
     [CLS.ROCK]: { wash: [0.1, 0.55, 1.2, 0.3], line: [0.55, 0.15, 0.75, 1.6], marks: [0.8, 6, MARK.ROCK], haze: 2.2 },
     [CLS.WATER]: { wash: [0.0, 0.05, 2.0, 0.1], line: [0, 0, 0.3, 1.0], marks: [0.0, 14, MARK.NONE] },
+    // architecture: pale washes, the contours and joints drawn (界画)
     [CLS.ROOF]: { ...ARCH, wash: [0.45, 0.35, 1.2, 0.2], line: [0.8, 0.35, 0.6, 1.0], marks: [0.25, 4, MARK.GRAIN] },
     [CLS.WOOD]: { ...ARCH, wash: [0.35, 0.4, 1.2, 0.2] },
     [CLS.WALL]: { ...ARCH, wash: [0.02, 0.18, 1.8, 0.4], marks: [0.15, 8, MARK.GRAIN] },
-    [CLS.STONE]: { ...ARCH, wash: [0.04, 0.2, 1.5, 0.25], marks: [0.6, 6, MARK.MASONRY] },
+    [CLS.STONE]: { ...ARCH, wash: [0.02, 0.1, 1.6, 0.08], line: [0.95, 0.7, 0.22, 1.6], marks: [0, 6, MARK.NONE] },
     [CLS.METAL]: { ...ARCH, wash: [0.4, 0.4, 1.0, 0.2] },
     [CLS.DARK]: { ...ARCH, wash: [0.6, 0.3, 1.0, 0.1] },
     [CLS.GLOW]: { ...ARCH, wash: [0.0, 0.1, 2.0, 0.1] },
     [CLS.BARK]: { wash: [0.55, 0.3, 1.0, 0.15], line: [0.8, 0.1, 0.6, 1.4], marks: [0.3, 5, MARK.GRAIN] },
-    // trees: masses of wash and marks, outlines faint
-    [CLS.WILLOW]: { wash: [0.0, 0.06, 1.5, 0.08], line: [0.04, 0, 0.3, 0.8], marks: [0.5, 4, MARK.VEIL] },
-    [CLS.BROAD]: { wash: [0.12, 0.3, 1.2, 0.4], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
-    [CLS.PINE]: { wash: [0.16, 0.34, 1.1, 0.4], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 4, MARK.LEAF] },
-    [CLS.MAPLE]: { wash: [0.1, 0.3, 1.2, 0.35], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
-    [CLS.GINKGO]: { wash: [0.08, 0.28, 1.3, 0.35], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
-    [CLS.BLOSSOM]: { wash: [0.02, 0.07, 1.5, 0.1], line: [0.05, 0, 0.3, 0.8], marks: [0.7, 3, MARK.LEAF], tint: [0.86, 0.5, 0.52, 0.45] },
+    // trees: a crown is clumps of wash (wash.x base, wash.y the crown's gain) and leaf marks (marks.x their gain);
+    // outlines faint. Willows airy, a veil of strands; pines the darkest (墨松)
+    [CLS.WILLOW]: { wash: [0.0, 0.24, 1, 0], line: [0.2, 0, 0.3, 0.8], marks: [1.2, 16, MARK.VEIL] },
+    [CLS.BROAD]: { wash: [0.0, 0.75, 1, 0], line: [0.06, 0, 0.3, 0.8], marks: [1.0, 5.5, MARK.LEAF] },
+    [CLS.PINE]: { wash: [0.08, 1.2, 1, 0], line: [0.06, 0, 0.3, 0.8], marks: [1.0, 5.5, MARK.LEAF] },
+    [CLS.MAPLE]: { wash: [0.0, 0.56, 1, 0], line: [0.06, 0, 0.3, 0.8], marks: [1.0, 5.5, MARK.LEAF] },
+    [CLS.GINKGO]: { wash: [0.0, 0.56, 1, 0], line: [0.06, 0, 0.3, 0.8], marks: [1.0, 5.5, MARK.LEAF] },
+    // peach blossom: a breath of wash (wash.x + wash.y × shade) under pale pink dots
+    [CLS.BLOSSOM]: { wash: [0.09, 0.1, 1, 0], line: [0.05, 0, 0.3, 0.8], marks: [1.0, 5, MARK.BLOSSOM], tint: [0.84, 0.46, 0.5, 0.62] },
     [CLS.BLOOM]: { wash: [0.02, 0.06, 1.5, 0.1], line: [0.75, 0.5, 0.2, 0.8], tint: [0.9, 0.55, 0.6, 0.4] },
     [CLS.LOTUS]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.16, 0, 0.3, 1.0], marks: [0.6, 6, MARK.LEAF] },
     [CLS.IVY]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.3, 0, 0.3, 0.8], marks: [0.6, 4, MARK.LEAF] },
