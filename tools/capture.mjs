@@ -68,7 +68,10 @@ try {
       if (cut) { e.camera.lookAt(p.at, p.to); e.renderer.cut(); }
       if (p.look !== undefined && p.look !== look) e.setLook(p.look);
       e.walker.mode = p.fly ? 'fly' : 'walk';
-      e.camera.fovY = p.fov ?? 42;
+      // (a place's field of view widens on a screen narrower than its fitAspect, as linan's does)
+      const vp = p.place ? e.scene?.viewpoints?.find((v) => v.id === p.place) : null;
+      const fit = vp?.fitAspect ?? 0, asp = e.camera.aspect, fov = p.fov ?? 42;
+      e.camera.fovY = fit > asp ? (Math.atan((Math.tan((fov * Math.PI) / 360) * fit) / asp) * 360) / Math.PI : fov;
       let px;
       for (let i = 0; i < frames; i++) {
         e.camera.lookAt(p.at, p.to);
