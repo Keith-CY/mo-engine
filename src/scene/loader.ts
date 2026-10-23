@@ -19,6 +19,7 @@ interface SceneJson {
   textures?: TextureJson[];
   paths?: SceneData['paths'];
   geometry?: string[];
+  instanceFiles?: string[];
   looks?: SceneData['looks'];
   walk?: SceneData['walk'];
 }
@@ -60,7 +61,16 @@ export async function loadMoScene(base: string | URL): Promise<SceneData> {
     await Promise.all(Array.from({ length: Math.min(4, gfiles.length) }, worker));
   };
   const [, inst, near, far, textures] = await Promise.all([
-    fetchGeometry(), fetchBuffer(new URL('instances.bin', root)),
+    fetchGeometry(),
+    // (instances in bands of whole records when they pass a file's size: joined, they are instances.bin)
+    j.instanceFiles?.length
+      ? Promise.all(j.instanceFiles.map((f) => fetchBuffer(new URL(f, root)))).then((parts) => {
+        const out = new Uint8Array(parts.reduce((s, p) => s + p.byteLength, 0));
+        let o = 0;
+        for (const p of parts) { out.set(new Uint8Array(p), o); o += p.byteLength; }
+        return out.buffer;
+      })
+      : fetchBuffer(new URL('instances.bin', root)),
     field(j.terrain?.near), field(j.terrain?.far),
     Promise.all((j.textures ?? []).map(async (t) => {
       if (t.format !== 'r8unorm') throw new Error(`[mo] texture ${t.name}: ${t.format} (r8unorm only)`);
