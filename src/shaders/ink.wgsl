@@ -26,7 +26,7 @@
 @group(0) @binding(6) var<storage, read> inst: array<u32>;
 
 const C_GROUND = 1u; const C_ROCK = 2u; const C_WATER = 3u; const C_BARK = 11u; const C_SMALL = 15u; const C_PAVE = 27u;
-fn isArch(c: u32) -> bool { return (c >= 4u && c <= 7u) || c == 13u || c == 19u || c == 21u || c == 22u || c == 25u; }
+fn isArch(c: u32) -> bool { return (c >= 4u && c <= 7u) || c == 13u || c == 14u || c == 19u || c == 21u || c == 22u || c == 25u; }
 const M_GRAIN = 1u; const M_LEAF = 2u; const M_VEIL = 3u; const M_GRASS = 4u; const M_PAVE = 5u; const M_ROCK = 6u;
 const M_BLOSSOM = 8u;
 const C_ROOF = 4u; const C_GLOW = 13u; const C_PINE = 8u; const C_MAPLE = 18u; const C_GINKGO = 23u; const C_IVY = 26u; const C_BLOOM = 28u;
@@ -585,6 +585,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let grove = smoothstep(0.28, 0.72, vnoise2(O.xz / 55.0 + 3.3) * 0.7 + vnoise2(O.xz / 21.0 + 8.1) * 0.3);
       let t5 = (0.6 + 0.8 * hs * hs) * mix(0.4, 1.35, grove);
       ink = s0.x + s0.y * F.gains.x * (0.16 + 0.55 * shade + 0.2 * under + 0.3 * clumpB) * mix(0.35, 1.0, body) * t5;
+      // the deepest crowns held short of solid black, so their clumps and leaf marks still read
+      ink = select(ink, 0.55 + 0.3 * (1.0 - exp((0.55 - ink) / 0.3)), ink > 0.55);
       // the leaf marks gather on the clumps' shaded undersides
       let dens = clamp(0.12 + 0.3 * shade + 0.6 * clumpB, 0.0, 0.9) * mix(0.4, 1.0, body);
       if (willow) { leaf = willowStrands(lp, fpo * 16.0, fpo, dens * 0.55, tseed); }
@@ -712,7 +714,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     if (sn > 0.0 && c0 >= 0.0) {
       let hp = (sm / sn - c0) / (sm / sn + 0.04) * 0.25;
       var kk = 0.4;
-      if (cls == C_PAVE) { kk = 0.35; } else if (cls == C_ROOF || cls == 19u) { kk = 0.15; } else if (isArch(cls)) { kk = 1.0; }
+      if (cls == C_PAVE) { kk = 0.35; } else if (cls == C_ROOF || cls == 19u) { kk = 0.5; } else if (isArch(cls)) { kk = 1.0; }
       else if (crown) { kk = 0.12; } else if (cls == 24u) { kk = 0.7; } else if (cls == C_ROCK || cls == 25u) { kk = 0.12 * F.veil.w; }
       else if (cls == 12u) { kk = 0.2; } else if (cls == C_GROUND) { kk = 1.1; }
       let lo = select(select(0.015, 0.005, fineK), select(0.06, 0.03, cls == C_GROUND), cls == C_GROUND || cls == C_PAVE);

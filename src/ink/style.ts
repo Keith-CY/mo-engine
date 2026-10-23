@@ -122,6 +122,8 @@ export const DEFAULT_STYLE: InkStyle = {
     [CLS.METAL]: { ...ARCH, wash: [0.4, 0.4, 1.0, 0.2] },
     [CLS.DARK]: { ...ARCH, wash: [0.6, 0.3, 1.0, 0.1] },
     [CLS.GLOW]: { ...ARCH, wash: [0.0, 0.1, 2.0, 0.1] },
+    // boats: a steep curve, the canvas of a sail left nearly paper, a tarred hull dark
+    [CLS.BOAT]: { ...ARCH, wash: [0.0, 2.0, 5.0, 0.15] },
     [CLS.BARK]: { wash: [0.55, 0.3, 1.0, 0.15], line: [0.8, 0.1, 0.6, 1.4], marks: [0.3, 5, MARK.GRAIN] },
     // trees: a crown is clumps of wash (wash.x base, wash.y the crown's gain) and leaf marks (marks.x their gain);
     // outlines faint. Willows airy, a veil of strands; pines the darkest (墨松)
