@@ -577,6 +577,14 @@ export class Renderer {
     this.frameNo++;
   }
 
+  /** a cut (a teleport, the start of a capture): every instance takes its level afresh, without dissolving from
+   *  where the eye was, and the painting starts without history */
+  cut(): void {
+    const s = this.scene;
+    if (s) this.device.queue.writeBuffer(s.lodState, 0, new Uint32Array(s.instanceCount).fill(0xff));
+    this.frameNo = 0;
+  }
+
   /** every instance's current LOD level (0xff: none yet; ≥ levels: beyond the last), for the comfort checks */
   async readLodState(): Promise<Uint32Array> {
     const s = this.scene;

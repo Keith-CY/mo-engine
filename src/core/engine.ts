@@ -109,6 +109,9 @@ export class Engine {
 
   goTo(v: Viewpoint): void {
     if (v.look !== undefined && v.look !== this.look?.id) this.setLook(v.look);
+    // a jump is a cut: no levels dissolving from where the eye was, no history
+    const p = this.camera.position;
+    if (Math.hypot(v.position[0] - p[0], v.position[1] - p[1], v.position[2] - p[2]) > 50) this.renderer.cut();
     this.camera.lookAt(v.position, v.target);
     this.view = v;
     this.fitFov();
