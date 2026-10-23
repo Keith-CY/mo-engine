@@ -582,7 +582,7 @@ export class Renderer {
    *  where the eye was, and the painting starts without history */
   cut(): void {
     const s = this.scene;
-    if (s) this.device.queue.writeBuffer(s.lodState, 0, new Uint32Array(s.instanceCount).fill(0xff));
+    if (s) this.device.queue.writeBuffer(s.lodState, 0, new Uint32Array(s.instanceCount).fill(0xffff));
     this.frameNo = 0;
   }
 

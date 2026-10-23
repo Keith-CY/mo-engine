@@ -115,7 +115,8 @@ export class GpuScene {
     this.batchOf = bufferFrom(device, batchOf, GPUBufferUsage.STORAGE, 'mo batchOf');
     this.batches = bufferFrom(device, new Uint8Array(binfo), GPUBufferUsage.STORAGE, 'mo batches');
     this.slotBase = bufferFrom(device, new Uint32Array(this.slots.map((s) => s.visibleBase)), GPUBufferUsage.STORAGE, 'mo slotBase');
-    this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xff), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 'mo lodState');
+    this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xffff), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 'mo lodState');
+    // (the state word: no level (0xff) and none being left (0xff) — a 0 there would read as dissolving out of level 0)
     // one set of draws per pass (the view, then each cascade)
     const args = new Uint32Array(this.slots.length * 5 * PASSES);
     for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => args.set([s.indexCount, 0, s.firstIndex, s.baseVertex, 0], (p * this.slots.length + i) * 5));
