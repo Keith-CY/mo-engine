@@ -354,6 +354,7 @@ export class Renderer {
   setScene(data: SceneData): FrameStats {
     const d = this.device;
     const s = (this.scene = new GpuScene(d, data));
+    this.meshNames = data.meshes.map((m) => m.name);
     this.uploadFields(data);
     this.uploadPave(data);
     this.uploadPaths(data);
@@ -598,6 +599,34 @@ export class Renderer {
     buf.unmap(); buf.destroy();
     return out;
   }
+
+  /** what the last frame drew, per pass (the view, then each cascade): instances and triangles, and the slots with
+   *  the most triangles (the diagnostics of a large scene) */
+  async readDrawStats(top = 8): Promise<{ passes: { instances: number; triangles: number }[]; heaviest: { pass: number; mesh: string; level: number; instances: number; triangles: number }[] }> {
+    const s = this.scene;
+    if (!s) return { passes: [], heaviest: [] };
+    const size = s.slots.length * 20 * PASSES;
+    const buf = this.device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(s.args, 0, buf, 0, size);
+    this.device.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const a = new Uint32Array(buf.getMappedRange().slice(0));
+    buf.unmap(); buf.destroy();
+    const passes = [], all = [];
+    for (let p = 0; p < PASSES; p++) {
+      let inst = 0, tris = 0;
+      s.slots.forEach((sl, i) => {
+        const n = a[(p * s.slots.length + i) * 5 + 1], t = (n * sl.indexCount) / 3;
+        inst += n; tris += t;
+        if (n) all.push({ pass: p, mesh: this.meshNames[sl.mesh] ?? String(sl.mesh), level: sl.level, instances: n, triangles: t });
+      });
+      passes.push({ instances: inst, triangles: tris });
+    }
+    all.sort((x, y) => y.triangles - x.triangles);
+    return { passes, heaviest: all.slice(0, top) };
+  }
+  private meshNames: string[] = [];
 
   /** the last captured frame as RGBA bytes (width × height × 4) */
   async readCapture(): Promise<{ width: number; height: number; data: Uint8Array }> {
