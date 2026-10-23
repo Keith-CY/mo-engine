@@ -9,6 +9,11 @@ export interface MeshData {
   normals: Float32Array;
   /** albedo luminance per vertex (0..1); absent: `tone` for the whole mesh */
   tones?: Float32Array;
+  uvs?: Float32Array;
+  /** per vertex: bits 0–15 the class of its triangles (0xffff: the mesh's), bit 16 alpha-tested */
+  vclass?: Uint32Array;
+  /** the alpha mask of its alpha-tested triangles (`all`: every triangle, when there is no vclass) */
+  mask?: { texture: number; cutoff: number; all: boolean };
   tone: number;
   indices: Uint32Array;
   /** bounding sphere in the mesh's own space */
@@ -35,6 +40,16 @@ export interface Heightfield {
   width: number;
   depth: number;
   heights: Float32Array;
+  /** the class of each sample (same grid), when the ground is not all one class */
+  classes?: Uint8Array;
+}
+
+/** a one-channel texture (alpha masks), row-major, row 0 at v = 0 */
+export interface TextureData {
+  name: string;
+  width: number;
+  height: number;
+  data: Uint8Array<ArrayBuffer>;
 }
 
 export interface Viewpoint {
@@ -57,6 +72,7 @@ export interface SceneData {
   /** heightfields; `drawn: false` when the scene has its own ground meshes and the fields only carry the walker */
   terrain?: { near?: Heightfield; far?: Heightfield; cls: number; drawn?: boolean };
   water: { name: string; level: number; mesh: number }[];
+  textures?: TextureData[];
   /** towards the sun, unit length */
   sun: [number, number, number];
   viewpoints: Viewpoint[];
@@ -65,6 +81,8 @@ export interface SceneData {
 export const INSTANCE_BYTES = 64;
 export const CLASS_OWN = 0xffffffff;
 export const FLAG_SHADOW = 1, FLAG_TWO_SIDED = 2, FLAG_WATER = 4;
+/** vclass: the mesh's own class (bits 0–15), alpha-tested (bit 16) */
+export const VCLASS_OWN = 0xffff, VCLASS_ALPHA = 0x10000;
 
 /** the class ids the linan world uses (its src/ink/gbuffer.js CLS); a scene's own table wins */
 export const CLS = {

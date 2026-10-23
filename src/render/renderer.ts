@@ -8,6 +8,7 @@ import type { Gpu } from '../gpu/device';
 import { bufferFrom } from '../gpu/device';
 import { packStyle, type InkStyle } from '../ink/style';
 import { GpuScene, PASSES, VERTEX_FLOATS } from '../scene/gpuscene';
+import { alphaMips } from '../gpu/mips';
 import type { SceneData } from '../scene/types';
 import FRAME from '../shaders/frame.wgsl';
 import CULL from '../shaders/cull.wgsl';
@@ -46,7 +47,11 @@ export class Renderer {
   private shadowMap: GPUTexture;
   private shadowPassBuf: GPUBuffer;
   private shadowFrameBG!: GPUBindGroup;
-  private layouts!: { frame: GPUBindGroupLayout; scene: GPUBindGroupLayout; draw: GPUBindGroupLayout };
+  private layouts!: { frame: GPUBindGroupLayout; shadowFrame: GPUBindGroupLayout; scene: GPUBindGroupLayout; draw: GPUBindGroupLayout };
+  /** the alpha mask of alpha-tested cards (the scene's first texture; 1 × 1 white without one) */
+  private alphaTex?: GPUTexture;
+  private alphaSampler!: GPUSampler;
+  private shadowCmpSampler!: GPUSampler;
   private sampler: GPUSampler;
   private targets?: Targets;
   private scene?: GpuScene;
@@ -99,26 +104,25 @@ export class Renderer {
       { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d-array' } },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'comparison' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
     ] });
     const shadowFrame = d.createBindGroupLayout({ label: 'mo shadow frame layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
     ] });
     const scene = d.createBindGroupLayout({ label: 'mo scene layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
     ] });
-    const draw = d.createBindGroupLayout({ label: 'mo draw layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } }] });
-    this.layouts = { frame, scene, draw };
-    this.frameBG = d.createBindGroup({ layout: frame, entries: [
-      { binding: 0, resource: { buffer: this.frameBuf } },
-      { binding: 1, resource: this.shadowMap.createView({ dimension: '2d-array' }) },
-      { binding: 2, resource: d.createSampler({ compare: 'less', magFilter: 'linear', minFilter: 'linear' }) },
-    ] });
-    this.shadowFrameBG = d.createBindGroup({ layout: shadowFrame, entries: [
-      { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: this.shadowPassBuf, size: 16 } },
-    ] });
+    const draw = d.createBindGroupLayout({ label: 'mo draw layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } }] });
+    this.layouts = { frame, shadowFrame, scene, draw };
+    this.alphaSampler = d.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
+    this.shadowCmpSampler = d.createSampler({ compare: 'less', magFilter: 'linear', minFilter: 'linear' });
+    this.bindFrame();
     const pass = new Uint32Array(CASCADE_RADII.length * 64);
     CASCADE_RADII.forEach((_, k) => pass.set([k, 0, 0, 0], k * 64));
     d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
@@ -139,6 +143,8 @@ export class Renderer {
             { shaderLocation: 0, offset: 0, format: 'float32x3' },
             { shaderLocation: 1, offset: 12, format: 'float32x3' },
             { shaderLocation: 2, offset: 24, format: 'float32' },
+            { shaderLocation: 3, offset: 28, format: 'float32x2' },
+            { shaderLocation: 4, offset: 36, format: 'uint32' },
           ] }],
         },
         fragment: { module: gmod, entryPoint: 'fs', targets: [{ format: 'rgba16float' }, { format: 'rgba16float' }, { format: 'rgba32uint' }] },
@@ -149,7 +155,11 @@ export class Renderer {
       d.createRenderPipelineAsync({
         label: 'mo shadow',
         layout: d.createPipelineLayout({ bindGroupLayouts: [shadowFrame, scene, draw] }),
-        vertex: { module: smod, entryPoint: 'vs', buffers: [{ arrayStride: VERTEX_FLOATS * 4, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] },
+        vertex: { module: smod, entryPoint: 'vs', buffers: [{ arrayStride: VERTEX_FLOATS * 4, attributes: [
+          { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 28, format: 'float32x2' }, { shaderLocation: 2, offset: 36, format: 'uint32' },
+        ] }] },
+        // (alpha-tested cards cut their shadows too: dappled light under the willows)
+        fragment: { module: smod, entryPoint: 'fs', targets: [] },
         primitive: { topology: 'triangle-list', cullMode: 'none' },
         depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less', depthBias: 2, depthBiasSlopeScale: 1.5 },
       }),
@@ -161,6 +171,40 @@ export class Renderer {
     this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
   }
 
+  /** the bind groups that hold the alpha mask (made again when a scene brings its own) */
+  private bindFrame(): void {
+    const d = this.device;
+    if (!this.alphaTex) {
+      this.alphaTex = d.createTexture({ label: 'mo alpha (none)', size: [1, 1], format: 'r8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      d.queue.writeTexture({ texture: this.alphaTex }, new Uint8Array([255]), { bytesPerRow: 1 }, [1, 1]);
+    }
+    const alpha = this.alphaTex.createView();
+    this.frameBG = d.createBindGroup({ layout: this.layouts.frame, entries: [
+      { binding: 0, resource: { buffer: this.frameBuf } },
+      { binding: 1, resource: this.shadowMap.createView({ dimension: '2d-array' }) },
+      { binding: 2, resource: this.shadowCmpSampler },
+      { binding: 3, resource: alpha }, { binding: 4, resource: this.alphaSampler },
+    ] });
+    this.shadowFrameBG = d.createBindGroup({ layout: this.layouts.shadowFrame, entries: [
+      { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: this.shadowPassBuf, size: 16 } },
+      { binding: 2, resource: alpha }, { binding: 3, resource: this.alphaSampler },
+    ] });
+  }
+
+  /** the scene's alpha mask on the GPU, with coverage-preserving mip levels */
+  private uploadAlpha(data: SceneData): void {
+    const t = data.textures?.[0];
+    if (!t) return;
+    if ((data.textures?.length ?? 0) > 1) console.warn(`[mo] ${data.textures!.length} textures: only the first (${t.name}) is used`);
+    const cutoff = data.meshes.find((m) => m.mask)?.mask?.cutoff ?? 0.5;
+    const mips = alphaMips(t.data, t.width, t.height, cutoff);
+    const tex = this.device.createTexture({ label: `mo alpha ${t.name}`, size: [t.width, t.height], format: 'r8unorm', mipLevelCount: mips.length, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    mips.forEach((m, level) => this.device.queue.writeTexture({ texture: tex, mipLevel: level }, m.data, { bytesPerRow: m.width }, [m.width, m.height]));
+    this.alphaTex?.destroy();
+    this.alphaTex = tex;
+    this.bindFrame();
+  }
+
   setStyle(style: InkStyle): void {
     this.style = style;
     this.device.queue.writeBuffer(this.styleBuf, 0, packStyle(style));
@@ -169,6 +213,7 @@ export class Renderer {
   setScene(data: SceneData): FrameStats {
     const d = this.device;
     const s = (this.scene = new GpuScene(d, data));
+    this.uploadAlpha(data);
     this.sceneBG = d.createBindGroup({ layout: this.layouts.scene, entries: [
       { binding: 0, resource: { buffer: s.instances } }, { binding: 1, resource: { buffer: s.visible } },
       { binding: 2, resource: { buffer: s.lodState } },
@@ -177,7 +222,7 @@ export class Renderer {
     const du = new Uint32Array(draws), df = new Float32Array(draws);
     s.slots.forEach((sl, i) => {
       const o = (i * DRAW_STRIDE) / 4;
-      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level;
+      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff;
     });
     this.drawBuf = bufferFrom(d, new Uint8Array(draws), GPUBufferUsage.UNIFORM, 'mo draws');
     this.drawBG = d.createBindGroup({ layout: this.layouts.draw, entries: [{ binding: 0, resource: { buffer: this.drawBuf, size: 32 } }] });

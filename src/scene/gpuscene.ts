@@ -4,10 +4,11 @@
  * (src/shaders/cull.wgsl). The CPU's work per frame does not grow with the number of instances.
  */
 import { bufferFrom } from '../gpu/device';
-import { INSTANCE_BYTES, type SceneData } from './types';
+import { INSTANCE_BYTES, VCLASS_ALPHA, VCLASS_OWN, type SceneData } from './types';
 
-/** interleaved vertex: position (3), normal (3), albedo luminance (1) */
-export const VERTEX_FLOATS = 7;
+/** interleaved vertex (4-byte words): position (3), normal (3), albedo luminance (1), uv (2), class word (1, u32: bits
+ *  0–15 the class of its triangles or 0xffff for the mesh's, bit 16 alpha-tested) */
+export const VERTEX_FLOATS = 10;
 /** passes the culling fills: the view, then each shadow cascade (src/shaders/frame.wgsl CASCADES) */
 export const PASSES = 3;
 
@@ -24,6 +25,8 @@ export interface Slot {
   hasTone: boolean;
   /** the LOD level this slot holds (0 for a plain mesh) */
   level: number;
+  /** alpha cutoff of its alpha-tested triangles (0: none) */
+  cutoff: number;
 }
 
 export class GpuScene {
@@ -49,6 +52,7 @@ export class GpuScene {
     let nv = 0, ni = 0;
     for (const m of scene.meshes) { nv += m.positions.length / 3; ni += m.indices.length; }
     const vdata = new Float32Array(nv * VERTEX_FLOATS);
+    const vwords = new Uint32Array(vdata.buffer);
     const idata = new Uint32Array(ni);
     const where: { baseVertex: number; firstIndex: number }[] = [];
     let v = 0, k = 0, tris = 0;
@@ -60,6 +64,8 @@ export class GpuScene {
         vdata[o] = m.positions[j * 3]; vdata[o + 1] = m.positions[j * 3 + 1]; vdata[o + 2] = m.positions[j * 3 + 2];
         vdata[o + 3] = m.normals[j * 3]; vdata[o + 4] = m.normals[j * 3 + 1]; vdata[o + 5] = m.normals[j * 3 + 2];
         vdata[o + 6] = m.tones ? m.tones[j] : m.tone;
+        if (m.uvs) { vdata[o + 7] = m.uvs[j * 2]; vdata[o + 8] = m.uvs[j * 2 + 1]; }
+        vwords[o + 9] = m.vclass ? m.vclass[j] : VCLASS_OWN | (m.mask?.all ? VCLASS_ALPHA : 0);
       }
       idata.set(m.indices, k);
       v += n; k += m.indices.length;
@@ -82,7 +88,7 @@ export class GpuScene {
         const m = scene.meshes[l.mesh];
         this.slots.push({ level: li,
           mesh: l.mesh, indexCount: m.indices.length, firstIndex: where[l.mesh].firstIndex, baseVertex: where[l.mesh].baseVertex,
-          visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones,
+          visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones, cutoff: m.mask?.cutoff ?? 0,
         });
         visibleTotal += b.count;
         tris += (m.indices.length / 3) * b.count;

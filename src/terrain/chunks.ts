@@ -5,7 +5,7 @@
  *
  * The far field is cut where the near field lies (its triangles there would fight with the near ones).
  */
-import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, heightAt, writeInstance, type Heightfield, type MeshData, type SceneData } from '../scene/types';
+import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, VCLASS_OWN, heightAt, writeInstance, type Heightfield, type MeshData, type SceneData } from '../scene/types';
 
 interface FieldPlan {
   field: Heightfield;
@@ -24,7 +24,8 @@ function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: numb
   if (n < 1 || m < 1) return null;
   const ox = f.origin[0] + i0 * c, oz = f.origin[1] + k0 * c;
   const H = (i: number, k: number) => f.heights[Math.min(f.depth - 1, k) * f.width + Math.min(f.width - 1, i)];
-  const pos: number[] = [], nrm: number[] = [], idx: number[] = [];
+  const pos: number[] = [], nrm: number[] = [], idx: number[] = [], vcls: number[] = [];
+  const C = f.classes;
   const vert = (i: number, k: number, drop: number) => {
     const gi = i0 + i * step, gk = k0 + k * step;
     const h = H(gi, gk);
@@ -32,6 +33,8 @@ function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: numb
     const l = Math.hypot(dx, 2 * c, dz);
     pos.push(gi * c + f.origin[0] - ox, h - drop, gk * c + f.origin[1] - oz);
     nrm.push(dx / l, (2 * c) / l, dz / l);
+    // (the class of the sample: paving where the field says so)
+    vcls.push(C ? C[Math.min(f.depth - 1, gk) * f.width + Math.min(f.width - 1, gi)] : VCLASS_OWN);
     return pos.length / 3 - 1;
   };
   const grid: number[] = [];
@@ -67,6 +70,7 @@ function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: numb
   const center: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
   return {
     name: `terrain ${cx},${cz} /${step}`, cls, positions, normals: new Float32Array(nrm), tone, indices: new Uint32Array(idx),
+    vclass: C ? new Uint32Array(vcls) : undefined,
     center, radius: Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2,
   };
 }
@@ -76,15 +80,17 @@ export function addTerrain(scene: SceneData, tone = 0.62): SceneData {
   const t = scene.terrain;
   if (!t) return scene;
   const plans: FieldPlan[] = [];
+  // chunks big enough that a field makes at most ~300 of them (each chunk level is one draw per pass)
+  const chunkFor = (f: Heightfield, min: number) => Math.max(min, 2 ** Math.ceil(Math.log2(Math.sqrt((f.width * f.depth) / 300))));
   if (t.near) {
-    const span = t.near.cell * 128;
-    plans.push({ field: t.near, chunk: 128, levels: [{ step: 1, to: span * 1.2 }, { step: 4, to: span * 5 }, { step: 16, to: 1e5 }] });
+    const chunk = chunkFor(t.near, 128), span = t.near.cell * chunk;
+    plans.push({ field: t.near, chunk, levels: [{ step: 1, to: span * 1.2 }, { step: 4, to: span * 5 }, { step: 16, to: 1e5 }] });
   }
   if (t.far) {
-    const span = t.far.cell * 64;
+    const chunk = chunkFor(t.far, 64), span = t.far.cell * chunk;
     const n = t.near;
     const hole: FieldPlan['hole'] = n ? [n.origin[0] + n.cell, n.origin[1] + n.cell, n.origin[0] + (n.width - 2) * n.cell, n.origin[1] + (n.depth - 2) * n.cell] : undefined;
-    plans.push({ field: t.far, chunk: 64, levels: [{ step: 1, to: span * 2 }, { step: 4, to: 1e6 }], hole });
+    plans.push({ field: t.far, chunk, levels: [{ step: 1, to: span * 1.5 }, { step: 4, to: span * 6 }, { step: 16, to: 1e6 }], hole });
   }
   const added: { group: number; x: number; y: number; z: number }[] = [];
   for (const p of plans) {

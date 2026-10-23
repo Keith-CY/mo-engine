@@ -8,11 +8,14 @@ struct Draw {
   tone: f32,      // the mesh's albedo luminance when it has none per vertex
   hasTone: u32,
   level: u32,     // the LOD level this draw holds
+  cutoff: f32,    // alpha cutoff of its alpha-tested triangles
 };
 
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var shadowMap: texture_depth_2d_array;
 @group(0) @binding(2) var shadowCmp: sampler_comparison;
+@group(0) @binding(3) var alphaTex: texture_2d<f32>;
+@group(0) @binding(4) var alphaSamp: sampler;
 @group(1) @binding(0) var<storage, read> inst: array<u32>;
 @group(1) @binding(1) var<storage, read> visible: array<u32>;
 @group(1) @binding(2) var<storage, read> lodState: array<u32>;
@@ -29,6 +32,8 @@ struct VOut {
   @location(6) rel: vec3f,
   // dissolving between levels: how far (0 … 1), and whether this draw is the level coming (1) or going (−1)
   @location(7) @interpolate(flat) fade: vec2f,
+  @location(8) uv: vec2f,
+  @location(9) @interpolate(flat) alpha: u32,   // 1: alpha-tested
 };
 
 fn col(i: u32, c: u32) -> vec3f {
@@ -37,7 +42,8 @@ fn col(i: u32, c: u32) -> vec3f {
 }
 
 @vertex
-fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @builtin(instance_index) ii: u32) -> VOut {
+fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @location(3) uv: vec2f, @location(4) vcls: u32,
+      @builtin(instance_index) ii: u32) -> VOut {
   let i = visible[D.visibleBase + ii];
   let X = col(i, 0u); let Y = col(i, 1u); let Z = col(i, 2u); let T = col(i, 3u);
   let rel = X * p.x + Y * p.y + Z * p.z + (T - F.eye.xyz);
@@ -47,8 +53,12 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @bui
   // (uniformly scaled instances: the normal goes through the same axes; the scenes keep scale near uniform)
   o.nW = X * n.x + Y * n.y + Z * n.z;
   o.depth = -(F.viewRot * vec4f(rel, 1.0)).z;
+  // the class: the instance's, else the triangle's own (the vertex's class word), else the mesh's
   let ic = inst[i * 16u + 12u];
-  o.cls = select(ic, D.cls, ic == 0xffffffffu);
+  let vc = vcls & 0xffffu;
+  o.cls = select(ic, select(vc, D.cls, vc == 0xffffu), ic == 0xffffffffu);
+  o.uv = uv;
+  o.alpha = (vcls >> 16u) & 1u;
   o.seed = inst[i * 16u + 13u];
   o.id = i;
   o.tone = select(D.tone, tone, D.hasTone == 1u) * bitcast<f32>(inst[i * 16u + 14u]);
@@ -88,6 +98,9 @@ fn shadowAt(rel: vec3f, nW: vec3f) -> f32 {
 
 @fragment
 fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
+  // (sampled before any branch: an implicit-derivative sample needs uniform control flow)
+  let a = textureSample(alphaTex, alphaSamp, v.uv).r;
+  if (v.alpha == 1u && a < D.cutoff) { discard; }
   if (v.fade.y != 0.0) {
     // the dither cell: about a pixel at this distance, fixed to the world
     let cell = max(0.01, v.depth * F.params.x * 1.5);
