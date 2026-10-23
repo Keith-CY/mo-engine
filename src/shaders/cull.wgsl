@@ -39,7 +39,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   // the level, with hysteresis
   let levels = B.info.y;
   let h = F.lod.y;
-  var lvl = lodState[i];
+  let st = lodUnpack(lodState[i]);
+  let old = st.level;
+  var lvl = old;
   if (lvl == NONE) {
     lvl = 0u;
     while (lvl < levels && d > B.to[lvl]) { lvl++; }
@@ -47,10 +49,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     while (lvl < levels && d > B.to[min(lvl, 3u)] * (1.0 + h)) { lvl++; }
     while (lvl > 0u && d < B.to[lvl - 1u] * (1.0 - h)) { lvl--; }
   }
-  lodState[i] = lvl;
-  if (lvl >= levels) { return; }
+  // a new level dissolves in over FADE_FRAMES while the old one dissolves out
+  var prev = st.prev;
+  var start = st.start;
+  if (old != NONE && lvl != old) { prev = old; start = u32(F.eyeDelta.w) & 0xffffu; }
+  let fading = prev != NONE && prev < levels && lodAge(start, F.eyeDelta.w) < u32(F.lod.w);
+  if (!fading) { prev = NONE; }
+  lodState[i] = lvl | (prev << 8u) | (start << 16u);
+  if (lvl >= levels && !fading) { return; }
 
-  let slot = B.info.x + lvl;
+  // (the shadow casters take the level that stays, or the one leaving when none stays)
+  let slot = B.info.x + select(prev, lvl, lvl < levels);
   let slots = u32(F.counts.x);
   let passLen = u32(F.counts.y);
 
@@ -71,6 +80,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let p = F.planes[k];
     if (dot(p.xyz, c) + p.w < -r) { return; }
   }
-  let n = atomicAdd(&args[slot * 5u + 1u], 1u);
-  visible[slotBase[slot] + n] = i;
+  if (lvl < levels) {
+    let n = atomicAdd(&args[slot * 5u + 1u], 1u);
+    visible[slotBase[slot] + n] = i;
+  }
+  if (fading) {
+    let ps = B.info.x + prev;
+    let n = atomicAdd(&args[ps * 5u + 1u], 1u);
+    visible[slotBase[ps] + n] = i;
+  }
 }

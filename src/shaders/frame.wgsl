@@ -15,7 +15,7 @@ struct Frame {
   jitter: vec4f,          // this frame's sub-pixel offset (xy, px), last frame's (zw)
   params: vec4f,          // radians per pixel, near plane (m), frames at rest, 1 when the eye moved this frame
   planes: array<vec4f, 5>,// frustum planes, eye-relative (inside: dot(n, p) + d ≥ 0)
-  lod: vec4f,             // instance count, LOD hysteresis (fraction), LOD distance scale, unused
+  lod: vec4f,             // instance count, LOD hysteresis (fraction), LOD distance scale, LOD dissolve (frames)
   look: vec4f,            // haze distance (m), sky light, sun light, paper drift (m of forward travel per paper turn)
   paper: vec4f,           // paper colour (rgb), paper texture strength
   ink: vec4f,             // ink colour (rgb), line strength
@@ -26,6 +26,15 @@ struct Frame {
 };
 
 const CASCADES = 2u;
+// a change of LOD level dissolves over F.lod.w frames (the old and the new level drawn through complementary halves of
+// a dither hashed from the world position; 0: switched at once)
+
+/** an instance's LOD state word: level (bits 0–7, 0xff none), the level it leaves (8–15, 0xff none), frame the change
+ *  began (16–31) */
+struct LodWord { level: u32, prev: u32, start: u32 };
+fn lodUnpack(w: u32) -> LodWord { return LodWord(w & 0xffu, (w >> 8u) & 0xffu, w >> 16u); }
+/** frames since `start` (`frame`: the frame number, F.eyeDelta.w) */
+fn lodAge(start: u32, frame: f32) -> u32 { return ((u32(frame) & 0xffffu) - start) & 0xffffu; }
 
 fn octEncode(n: vec3f) -> vec2f {
   let p = n.xy / (abs(n.x) + abs(n.y) + abs(n.z));

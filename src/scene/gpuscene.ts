@@ -22,6 +22,8 @@ export interface Slot {
   cls: number;
   tone: number;
   hasTone: boolean;
+  /** the LOD level this slot holds (0 for a plain mesh) */
+  level: number;
 }
 
 export class GpuScene {
@@ -76,9 +78,9 @@ export class GpuScene {
       const levels = 'lodGroup' in b ? scene.lodGroups[b.lodGroup].levels : [{ mesh: b.mesh, to: 1e9 }];
       if (levels.length > 4) throw new Error(`[mo] a LOD group has ${levels.length} levels (4 at most)`);
       const first = this.slots.length;
-      for (const l of levels) {
+      for (const [li, l] of levels.entries()) {
         const m = scene.meshes[l.mesh];
-        this.slots.push({
+        this.slots.push({ level: li,
           mesh: l.mesh, indexCount: m.indices.length, firstIndex: where[l.mesh].firstIndex, baseVertex: where[l.mesh].baseVertex,
           visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones,
         });

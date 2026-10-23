@@ -7,6 +7,7 @@ struct Draw {
   cls: u32,       // the mesh's class (an instance may override it)
   tone: f32,      // the mesh's albedo luminance when it has none per vertex
   hasTone: u32,
+  level: u32,     // the LOD level this draw holds
 };
 
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -14,6 +15,7 @@ struct Draw {
 @group(0) @binding(2) var shadowCmp: sampler_comparison;
 @group(1) @binding(0) var<storage, read> inst: array<u32>;
 @group(1) @binding(1) var<storage, read> visible: array<u32>;
+@group(1) @binding(2) var<storage, read> lodState: array<u32>;
 @group(2) @binding(0) var<uniform> D: Draw;
 
 struct VOut {
@@ -25,6 +27,8 @@ struct VOut {
   @location(4) @interpolate(flat) seed: u32,
   @location(5) @interpolate(flat) id: u32,
   @location(6) rel: vec3f,
+  // dissolving between levels: how far (0 … 1), and whether this draw is the level coming (1) or going (−1)
+  @location(7) @interpolate(flat) fade: vec2f,
 };
 
 fn col(i: u32, c: u32) -> vec3f {
@@ -48,6 +52,11 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @bui
   o.seed = inst[i * 16u + 13u];
   o.id = i;
   o.tone = select(D.tone, tone, D.hasTone == 1u) * bitcast<f32>(inst[i * 16u + 14u]);
+  let st = lodUnpack(lodState[i]);
+  o.fade = vec2f(0.0);
+  if (st.prev != 0xffu) {
+    o.fade = vec2f(f32(lodAge(st.start, F.eyeDelta.w)) / max(F.lod.w, 1.0), select(-1.0, 1.0, D.level == st.level));
+  }
   return o;
 }
 
@@ -79,6 +88,12 @@ fn shadowAt(rel: vec3f, nW: vec3f) -> f32 {
 
 @fragment
 fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
+  if (v.fade.y != 0.0) {
+    // the dither cell: about a pixel at this distance, fixed to the world
+    let cell = max(0.01, v.depth * F.params.x * 1.5);
+    let hsh = hash3(vec3i(floor((v.rel + F.eye.xyz) / cell)));
+    if ((v.fade.y > 0.0 && hsh > v.fade.x) || (v.fade.y < 0.0 && hsh <= v.fade.x)) { discard; }
+  }
   var nW = normalize(v.nW);
   if (!front) { nW = -nW; }
   let nV = normalize((F.viewRot * vec4f(nW, 0.0)).xyz);

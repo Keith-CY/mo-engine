@@ -69,6 +69,8 @@ export class Renderer {
   /** LOD distance scale (> 1: coarser sooner) and hysteresis */
   lodScale = 1;
   lodHysteresis = 0.08;
+  /** frames over which a change of LOD level dissolves (0: at once) */
+  lodFadeFrames = 24;
 
   constructor(private readonly gpu: Gpu, style: InkStyle) {
     this.device = gpu.device;
@@ -105,8 +107,9 @@ export class Renderer {
     const scene = d.createBindGroupLayout({ label: 'mo scene layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
     ] });
-    const draw = d.createBindGroupLayout({ label: 'mo draw layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } }] });
+    const draw = d.createBindGroupLayout({ label: 'mo draw layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } }] });
     this.layouts = { frame, scene, draw };
     this.frameBG = d.createBindGroup({ layout: frame, entries: [
       { binding: 0, resource: { buffer: this.frameBuf } },
@@ -168,15 +171,16 @@ export class Renderer {
     const s = (this.scene = new GpuScene(d, data));
     this.sceneBG = d.createBindGroup({ layout: this.layouts.scene, entries: [
       { binding: 0, resource: { buffer: s.instances } }, { binding: 1, resource: { buffer: s.visible } },
+      { binding: 2, resource: { buffer: s.lodState } },
     ] });
     const draws = new ArrayBuffer(Math.max(1, s.slots.length) * DRAW_STRIDE);
     const du = new Uint32Array(draws), df = new Float32Array(draws);
     s.slots.forEach((sl, i) => {
       const o = (i * DRAW_STRIDE) / 4;
-      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0;
+      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level;
     });
     this.drawBuf = bufferFrom(d, new Uint8Array(draws), GPUBufferUsage.UNIFORM, 'mo draws');
-    this.drawBG = d.createBindGroup({ layout: this.layouts.draw, entries: [{ binding: 0, resource: { buffer: this.drawBuf, size: 16 } }] });
+    this.drawBG = d.createBindGroup({ layout: this.layouts.draw, entries: [{ binding: 0, resource: { buffer: this.drawBuf, size: 32 } }] });
     this.cullBG = d.createBindGroup({ layout: this.pipes.cull.getBindGroupLayout(0), entries: [
       { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: s.instances } },
       { binding: 2, resource: { buffer: s.batchOf } }, { binding: 3, resource: { buffer: s.batches } },
@@ -249,7 +253,7 @@ export class Renderer {
     const r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
     const planes = [r3.map((v, i) => v + r0[i]), r3.map((v, i) => v - r0[i]), r3.map((v, i) => v + r1[i]), r3.map((v, i) => v - r1[i]), r3.map((v, i) => v - r2[i])];
     planes.forEach((p, k) => { const l = Math.hypot(p[0], p[1], p[2]) || 1; f.set([p[0] / l, p[1] / l, p[2] / l, p[3] / l], 104 + k * 4); });
-    f.set([this.scene?.instanceCount ?? 0, this.lodHysteresis, 1 / this.lodScale, 0], 124);
+    f.set([this.scene?.instanceCount ?? 0, this.lodHysteresis, 1 / this.lodScale, this.lodFadeFrames], 124);
     f.set([L.hazeDistance, L.skyLight, L.sunLight, L.paperDrift], 128);
     f.set([...L.paperColor, L.paperTexture], 132);
     f.set([...L.inkColor, L.lineStrength], 136);

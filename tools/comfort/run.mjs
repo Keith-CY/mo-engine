@@ -8,6 +8,8 @@
 //   level steps    LOD levels before and after a pure turn: a turn must change none
 //   flick          live clock: turn 0.5 s at 60°/s, rest 0.8 s, five times; the slowest of the first 4 frames of each flick
 //   walk + turn    live clock: frame intervals while walking forward and turning 30°/s for 5 s
+//   pops           stepped clock: flying forward at 18 m/s for 3 s, frames whose change in some 45 px block jumps above
+//                  3 × its neighbours' (a mark or a level that pops instead of moving)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,6 +113,43 @@ try {
   for (let i = 0; i < levelsBefore.length; i++) if (levelsBefore[i] !== 0xff && levelsAfter[i] !== levelsBefore[i]) changed++;
   report.levelStepsDuringTurn = changed;
   fs.writeFileSync(path.join(OUT, 'turn-mid.pgm'), Buffer.concat([Buffer.from(`P5 ${SW} ${SH} 255\n`), Buffer.from(frames[N >> 1])]));
+
+  // pops while travelling, stepped
+  {
+    await page.evaluate(() => { const e = window.__mo.engine; e.beginCapture(); e.walker.mode = 'fly'; e.walker.keys.add('KeyW'); });
+    const fr = [];
+    for (let k = 0; k < 90; k++) {
+      const luma = await page.evaluate(async (sw, sh) => {
+        const f = await window.__mo.engine.captureFrame(30);
+        const out = new Uint8Array(sw * sh), d = f.data, w = f.width, sx = f.width / sw, sy = f.height / sh;
+        for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+          const o = (Math.floor(y * sy) * w + Math.floor(x * sx)) * 4;
+          out[y * sw + x] = 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2];
+        }
+        let b = ''; for (let i = 0; i < out.length; i += 0x8000) b += String.fromCharCode(...out.subarray(i, i + 0x8000));
+        return btoa(b);
+      }, SW, SH);
+      fr.push(new Uint8Array(Buffer.from(luma, 'base64')));
+    }
+    await page.evaluate(() => { const e = window.__mo.engine; e.walker.keys.delete('KeyW'); e.endCapture(); });
+    const BS = 45, bx = SW / BS, by = SH / BS, peak = [];
+    for (let k = 1; k < fr.length; k++) {
+      let m = 0;
+      for (let j = 0; j < by; j++) for (let i = 0; i < bx; i++) {
+        let s = 0;
+        for (let y = j * BS; y < (j + 1) * BS; y++) for (let x = i * BS; x < (i + 1) * BS; x++) s += Math.abs(fr[k][y * SW + x] - fr[k - 1][y * SW + x]);
+        m = Math.max(m, s / (BS * BS));
+      }
+      peak.push(m);
+    }
+    const spikes = [];
+    for (let k = 3; k < peak.length - 3; k++) {
+      const nb = [...peak.slice(k - 3, k), ...peak.slice(k + 1, k + 4)].sort((a, b) => a - b);
+      const med = (nb[2] + nb[3]) / 2;
+      if (peak[k] > 4 && peak[k] > 3 * (med + 0.5)) spikes.push([k, +peak[k].toFixed(1)]);
+    }
+    report.pops = { frames: fr.length, spikes: spikes.length, worst: spikes.sort((a, b) => b[1] - a[1]).slice(0, 5) };
+  }
 
   // flick, on the live clock
   report.flick = await page.evaluate(() => new Promise((res) => {
