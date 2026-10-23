@@ -30,6 +30,8 @@ export class Engine {
   private raf = 0;
   private lastReal = 0;
   private listeners: ((e: Engine) => void)[] = [];
+  /** the viewpoint last gone to (its field of view refits on resize) */
+  private view?: Viewpoint;
 
   private constructor(readonly canvas: HTMLCanvasElement, readonly gpu: Gpu, readonly renderer: Renderer, private pixelRatio: number) {
     this.walker = new Walker(this.camera);
@@ -59,7 +61,8 @@ export class Engine {
 
   goTo(v: Viewpoint): void {
     this.camera.lookAt(v.position, v.target);
-    this.camera.fovY = v.fovY;
+    this.view = v;
+    this.fitFov();
     const g = this.walker.ground(v.position[0], v.position[2]);
     this.walker.mode = Number.isFinite(g) && v.position[1] - g > 4 ? 'fly' : 'walk';
   }
@@ -69,6 +72,16 @@ export class Engine {
     const h = Math.max(2, Math.round(this.canvas.clientHeight * this.pixelRatio));
     this.canvas.width = w; this.canvas.height = h;
     this.camera.width = w; this.camera.height = h; this.camera.aspect = w / h;
+    this.fitFov();
+  }
+
+  /** the last viewpoint's field of view, widened on a screen narrower than its fitAspect */
+  private fitFov(): void {
+    const v = this.view;
+    if (!v) return;
+    const fit = v.fitAspect ?? 0, a = this.camera.aspect;
+    const t = Math.tan((v.fovY * Math.PI) / 360);
+    this.camera.fovY = fit > a ? (Math.atan((t * fit) / a) * 360) / Math.PI : v.fovY;
   }
 
   onFrame(f: (e: Engine) => void): void { this.listeners.push(f); }

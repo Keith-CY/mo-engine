@@ -60,6 +60,8 @@ export interface Viewpoint {
   position: [number, number, number];
   target: [number, number, number];
   fovY: number;
+  /** fovY holds at this aspect and wider; a narrower screen widens it to keep the same horizontal field */
+  fitAspect?: number;
 }
 
 export interface SceneData {
