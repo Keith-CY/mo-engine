@@ -37,6 +37,54 @@ const P_TENG = vec3f(0.03, 0.12, 0.95); const P_ZHU = vec3f(0.06, 0.85, 0.80);
 
 /** clouds on a layer ~2 km up, seen from the eye (fixed to the world, so a turn moves them rigidly): (coverage, the
  *  shaded underside) */
+/** ripple lines on the water (mode 0: short bowed strokes, sparse; 1: 水纹, rows of shallow arcs), in the frame of the
+ *  look's viewpoint (fixed per look, so a turn does not slide them), rows spread so they keep a screen spacing
+ *  (sinG: the sine at which the eye sees the water there) */
+fn ripples(P: vec3f, fp: f32, dens: f32, mode: f32, sinG: f32) -> f32 {
+  let f2 = normalize(F.shotDir.xy + vec2f(1e-6, 0.0));
+  let r2 = vec2f(f2.y, -f2.x);
+  let uK = F.viewport.x / 1664.0;
+  let l = log2(fp * select(46.0, 22.0, mode > 0.5) * uK);
+  let l0 = floor(l);
+  let t = smoothstep(0.0, 1.0, l - l0);
+  let q = vec2f(dot(P.xz, r2), dot(P.xz, f2));
+  var cov = 0.0;
+  for (var L = 0; L < 2; L++) {
+    let lev = l0 + f32(L);
+    let S = exp2(lev);
+    let Sv = S / max(sinG, 0.02) * select(0.35, 0.45, mode > 0.5);
+    let gi = floor(q / vec2f(S, Sv));
+    var c0 = 0.0;
+    for (var j = -1; j <= 1; j++) {
+      for (var i = -1; i <= 1; i++) {
+        let cc = gi + vec2f(f32(i), f32(j));
+        let h = h4(vec3i(vec2i(cc), i32(lev) * 5 + 3));
+        let on = select(markOn(h.x, dens), 1.0, mode > 0.5);
+        if (on <= 0.0) { continue; }
+        let ox = select(h.y, 0.5 * (abs(cc.y) % 2.0), mode > 0.5);
+        let v = q - (cc + vec2f(ox, 0.5)) * vec2f(S, Sv);
+        var cv = 0.0;
+        if (mode > 0.5) {
+          let u = v.x / (S * 0.5);
+          if (abs(u) > 1.0) { continue; }
+          let wpx = 0.5 * (0.6 + 0.8 * h.z) * (1.0 - u * u * 0.7) * uK;
+          let dpx = abs(v.y + (1.0 - u * u) * Sv * 0.35) * sinG / fp;
+          cv = (1.0 - smoothstep(wpx - 0.3, wpx + 0.5, dpx)) * markOn(h.x, dens * 1.4);
+        } else {
+          let u = v.x / (S * (0.35 + 0.4 * h.z));
+          if (abs(u) > 1.0) { continue; }
+          let wpx = 0.5 * (1.0 - u * u) * uK;
+          let dpx = abs(v.y - (1.0 - u * u) * Sv * 0.12 * (h.w - 0.5)) * sinG / fp;
+          cv = 1.0 - smoothstep(wpx - 0.3, wpx + 0.5, dpx);
+        }
+        c0 = max(c0, cv * (0.5 + 0.5 * h.w) * on);
+      }
+    }
+    cov += c0 * select(t, 1.0 - t, L == 0);
+  }
+  return cov;
+}
+
 /** a night painting: the day's painting graded into the night's indigo (paper a deep blue, ink near black-blue) */
 fn nightGrade(c: vec3f) -> vec3f {
   let l = dot(c, vec3f(0.3, 0.55, 0.15));
@@ -316,7 +364,13 @@ fn fs(v: VOut) -> @location(0) vec4f {
         sunPath = core * smoothstep(0.56 - 0.2 * core, 0.64 - 0.16 * core, rows) * MC.x;
       }
     }
-    ink = F.water.x * (0.75 + 0.5 * wn) * (1.0 - min(sunPath * (1.0 + 0.4 * F.accent.z), 1.0));
+    ink = F.water.x * (0.75 + 0.5 * wn);
+    // ripple lines (the look's `waves`), 水纹 rows where it asks for them (waveMode 1)
+    if (F.shotDir.z > 0.0) {
+      let rp = ripples(P, footprint, F.shotDir.z, F.shotDir.w, max(abs(dirW.y), 0.01));
+      ink = max(ink, rp * 0.6 * (1.0 - smoothstep(F.lines.y * 0.5, F.lines.y * 1.5, dist)));
+    }
+    ink *= 1.0 - min(sunPath * (1.0 + 0.4 * F.accent.z), 1.0);
   }
 
   // ---- tree crowns: clumps of foliage in the tree's own frame, each deeper underneath and paler on top, paper
@@ -351,14 +405,17 @@ fn fs(v: VOut) -> @location(0) vec4f {
       // groves: the wood gathers into darker and paler groups, not an even carpet of crowns
       let grove = smoothstep(0.28, 0.72, vnoise2(O.xz / 55.0 + 3.3) * 0.7 + vnoise2(O.xz / 21.0 + 8.1) * 0.3);
       let t5 = (0.6 + 0.8 * hs * hs) * mix(0.4, 1.35, grove);
-      ink = s0.x + s0.y * (0.16 + 0.55 * shade + 0.2 * under + 0.3 * clumpB) * mix(0.35, 1.0, body) * t5;
+      ink = s0.x + s0.y * F.gains.x * (0.16 + 0.55 * shade + 0.2 * under + 0.3 * clumpB) * mix(0.35, 1.0, body) * t5;
       // the leaf marks gather on the clumps' shaded undersides
       let dens = clamp(0.12 + 0.3 * shade + 0.6 * clumpB, 0.0, 0.9) * mix(0.4, 1.0, body);
       if (willow) { leaf = willowStrands(lp, fpo * 16.0, fpo, dens * 0.55, tseed); }
       else { leaf = leafDots(lp, fpo * 5.5, fpo, dens, tseed, 1.5) * (0.55 + 0.45 * clumpB); }
     }
-    leaf *= s2.x * (0.7 + 0.6 * hs) * (1.0 - smoothstep(1000.0, 2000.0, Do));
+    leaf *= s2.x * F.gains.z * (0.7 + 0.6 * hs) * (1.0 - smoothstep(1000.0, 2000.0, Do));
   }
+
+  // a roof's wash: the look's roof gain
+  if (cls == C_ROOF) { ink *= F.gains.y; }
 
   // ---- the wash laid in a few layers (墨分五色): each step soft, a darker rim where a layer ends (水渍), the steps'
   // edges wandering with a world noise of ~45 px. Crowns and buildings keep most of their smooth wash
@@ -423,7 +480,14 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let joint = bitcast<f32>(Cv.z);
   let block = bitcast<f32>(Cv.w);
   if (block >= 0.0) { ink += 0.07 * (block - 0.5); }
-  ink = max(ink, joint * select(0.6, 0.42, cls == C_PAVE) * F.ink.w);
+  ink = max(ink, joint * select(0.6, 0.42, cls == C_PAVE) * F.ink.w * F.gains.w);
+
+  // ---- snow: what faces up keeps the paper (the ground, rock, roofs, the tops of the crowns), its edge ragged
+  if (F.lines.z > 0.0 && cls != C_WATER && cls != C_GLOW) {
+    let sn = zoomNoise(P, footprint, 30.0, vec3f(4.1, 0.3, 8.8));
+    let cover = smoothstep(0.42, 0.72, nW.y + (sn - 0.5) * 0.35) * F.lines.z;
+    ink *= 1.0 - 0.85 * cover;
+  }
 
   // ---- the far land: hills carry a wash of their own (steeper is darker), graded into the haze below
   var hazeScale = s2.w;
@@ -451,7 +515,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
     e2 = max(e2, edgeTo(A, nV, cls, p, vec2i(0, -2), s1));
     edge = max(edge, e2 * ring2 * 0.7);
   }
-  edge *= mix(1.0, 0.6, smoothstep(60.0, 600.0, dist)) * lineK;
+  // (lines full near, a third of their ink from half the look's far distance on: 淡墨 for the middle ground)
+  edge *= mix(1.0, 0.3, smoothstep(F.lines.x * 1.5, F.lines.y * 0.5, dist)) * lineK;
   ink = max(ink, edge * F.ink.w);
 
   // ---- 留白: mist lying low in bands at distances from the look's viewpoint, and below a height, its edges ragged with
@@ -466,6 +531,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let along = 1.0 - smoothstep(b.y * 0.35, b.y, abs(dS - b.x) + (bn - 0.5) * b.y * 0.7);
       let low = 1.0 - smoothstep(b.w * 0.45, b.w, P.y - F.shotPos.w + (bn - 0.5) * b.w * 0.8);
       mist = max(mist, along * low * b.z * select(1.0, 0.45, isArch(cls)));
+    }
+    // the woods paling upward into the haze (a world height, so it holds still)
+    if (F.veil.z > 0.0 && (crown || cls == C_GROUND || cls == C_ROCK)) {
+      let vn = zoomNoise(P * vec3f(1.0, 2.0, 1.0) + vec3f(61.0), footprint, 60.0, vec3f(0.0));
+      mist = max(mist, F.veil.z * smoothstep(F.veil.x, F.veil.y, P.y + (vn - 0.5) * (F.veil.y - F.veil.x) * 0.8) * (1.0 - smoothstep(700.0, 1200.0, dist)));
     }
     let M = F.mist;
     if (M.w > 0.0) {

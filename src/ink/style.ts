@@ -62,6 +62,19 @@ export interface Look {
   /** the water's own wash, and the shore's reflection on it: gain (0 none), fade (screen px at 1664 wide; 0 default) */
   waterBase?: number;
   waterRefl?: [number, number];
+  /** the look's viewpoint looks along (x, z): ripple lines and wave rows on the water follow it (fixed per look) */
+  shotDir?: [number, number];
+  waves?: number;
+  waveMode?: number;
+  /** crown ink, roof ink, leaf marks, joints, relative to the 苏堤 look */
+  gains?: [number, number, number, number];
+  /** lines full at lineNear m, gone at lineFar m (log scale) */
+  lineNear?: number;
+  lineFar?: number;
+  /** snow on what faces up (0 … 1) */
+  snow?: number;
+  /** the woods paling upward into haze: from y0 to y1 (m), amount */
+  veil?: [number, number, number];
   /** a night painting: the sky's ink */
   night?: boolean;
   skyInk?: number;

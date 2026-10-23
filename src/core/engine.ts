@@ -94,6 +94,15 @@ export class Engine {
     st.look.waterBase = num('waterBase') ?? num('water') ?? 0.05;
     st.look.waterRefl = Array.isArray(ink.waterRefl) ? [(ink.waterRefl as number[])[0], (ink.waterRefl as number[])[1]] : [1, 0];
     st.look.night = !!(L.night || num('night')); st.look.skyInk = num('sky') ?? 0;
+    if (vp) { const dx = vp.target[0] - vp.position[0], dz = vp.target[2] - vp.position[2], l = Math.hypot(dx, dz) || 1; st.look.shotDir = [dx / l, dz / l]; }
+    st.look.waves = num('waves') ?? 0; st.look.waveMode = num('waveMode') ?? 0;
+    // (the gains as linan's ink shots give them, relative to the 苏堤 look the base style is tuned to: trees 0.75,
+    // roofs 1.6 (its MATCH default), leaf 1, detail 1)
+    st.look.gains = [(num('trees') ?? 0.75) / 0.75, (num('roofs') ?? 1.6) / 1.6, num('leaf') ?? 1, num('detail') ?? 1];
+    st.look.lineNear = num('near') ?? 8; st.look.lineFar = num('far') ?? 900;
+    st.look.snow = L.snow ?? num('paperLift') ?? 0;
+    const veil = ink.veil as number[] | undefined;
+    st.look.veil = Array.isArray(veil) && veil.length >= 3 ? [veil[0], veil[1], veil[2]] : [0, 0, 0];
     this.renderer.setStyle(st);
   }
   private baseStyle?: InkStyle;

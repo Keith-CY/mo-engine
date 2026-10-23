@@ -36,6 +36,10 @@ struct Frame {
   moonCol: vec4f,         // the sun's or moon's path on the water: amount, half width (rad), widening per rad below, dashes
   water: vec4f,           // the water's own wash, night (1), the night sky's ink, cloud bands
   refl: vec4f,            // the shore's reflection on the water: gain (0 none), fade (screen px at 1664 wide, 0: the default)
+  shotDir: vec4f,         // the look's viewpoint looks along (x, z); ripple lines (amount), wave rows (1: 水纹)
+  gains: vec4f,           // crown ink, roof ink, leaf marks, joints (1: as the 苏堤 look)
+  lines: vec4f,           // lines full at this distance (m), gone at this one (log scale); snow (0 … 1); unused
+  veil: vec4f,            // the woods paling upward into haze: from y0 to y1 (m), amount; unused
 };
 
 const CASCADES = 2u;
