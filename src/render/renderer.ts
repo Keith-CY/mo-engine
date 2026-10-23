@@ -49,7 +49,7 @@ export class Renderer {
   private drawBuf?: GPUBuffer;
   private cullBG?: GPUBindGroup;
   private frameBG!: GPUBindGroup;
-  private passBGs?: { ink: GPUBindGroup; resolve: GPUBindGroup[]; present: GPUBindGroup[] };
+  private passBGs?: { ink: GPUBindGroup; resolve: GPUBindGroup[]; present: GPUBindGroup[]; capture: GPUBindGroup[] };
   private frameNo = 0;
   private histIndex = 0;
   private prevViewProj = new Float32Array(16);
@@ -164,6 +164,7 @@ export class Renderer {
         { binding: 2, resource: t.hist[1 - k].createView() }, { binding: 3, resource: t.depth.createView() }, { binding: 4, resource: this.sampler },
       ] })),
       present: [0, 1].map((k) => d.createBindGroup({ layout: P.present.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.hist[k].createView() }] })),
+      capture: [0, 1].map((k) => d.createBindGroup({ layout: P.capture.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.hist[k].createView() }] })),
     };
     this.frameNo = 0;
     return t;
@@ -255,10 +256,24 @@ export class Renderer {
     const k = this.histIndex;
     pass('mo resolve', t.hist[k].createView(), this.pipes.resolve, B.resolve[k]);
     pass('mo present', this.gpu.context.getCurrentTexture().createView(), this.pipes.present, B.present[k]);
-    if (capture) pass('mo capture', t.display.createView(), this.pipes.capture, B.present[k]);
+    if (capture) pass('mo capture', t.display.createView(), this.pipes.capture, B.capture[k]);
     d.queue.submit([enc.finish()]);
     this.histIndex = 1 - k;
     this.frameNo++;
+  }
+
+  /** every instance's current LOD level (0xff: none yet; ≥ levels: beyond the last), for the comfort checks */
+  async readLodState(): Promise<Uint32Array> {
+    const s = this.scene;
+    if (!s) return new Uint32Array(0);
+    const buf = this.device.createBuffer({ size: s.instanceCount * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(s.lodState, 0, buf, 0, s.instanceCount * 4);
+    this.device.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const out = new Uint32Array(buf.getMappedRange().slice(0));
+    buf.unmap(); buf.destroy();
+    return out;
   }
 
   /** the last captured frame as RGBA bytes (width × height × 4) */

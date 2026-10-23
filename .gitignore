@@ -2,3 +2,5 @@ node_modules/
 dist/
 out/
 .chrome-profiles/
+examples/*/main.js
+examples/*/main.js.map

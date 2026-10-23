@@ -91,7 +91,7 @@ export class GpuScene {
     this.batchOf = bufferFrom(device, batchOf, GPUBufferUsage.STORAGE, 'mo batchOf');
     this.batches = bufferFrom(device, new Uint8Array(binfo), GPUBufferUsage.STORAGE, 'mo batches');
     this.slotBase = bufferFrom(device, new Uint32Array(this.slots.map((s) => s.visibleBase)), GPUBufferUsage.STORAGE, 'mo slotBase');
-    this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xff), GPUBufferUsage.STORAGE, 'mo lodState');
+    this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xff), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 'mo lodState');
     const args = new Uint32Array(this.slots.length * 5);
     this.slots.forEach((s, i) => args.set([s.indexCount, 0, s.firstIndex, s.baseVertex, 0], i * 5));
     this.argsTemplate = bufferFrom(device, args, GPUBufferUsage.COPY_SRC, 'mo args template');
