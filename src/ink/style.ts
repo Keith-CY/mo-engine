@@ -1,17 +1,21 @@
 /**
- * How a world is painted: per class (ground, water, willow, roof, …) a wash curve, a line weight, its surface marks,
- * how far it carries into the haze and a colour tint; per look the paper, the ink, the light and the haze. A world
- * passes its own table; DEFAULT_STYLE is 纯水墨 (ink only, a warm paper).
+ * How a world is painted: per class (ground, water, willow, roof, …) its wash, its lines, its marks, how far it carries
+ * into the haze and a colour tint; per look the paper, the ink, the light and the haze. A world passes its own table;
+ * DEFAULT_STYLE is 纯水墨 (ink only, a warm paper), after the linan painter: contours belong to architecture (界画) and a
+ * few key forms; trees, hills, grass and water are described by washes, and their outlines are faint.
  */
 import { CLS } from '../scene/types';
 
+/** what a class's marks are (src/shaders/ink.wgsl) */
+export const MARK = { NONE: 0, GRAIN: 1, LEAF: 2, VEIL: 3, GRASS: 4, PAVE: 5, ROCK: 6 } as const;
+
 export interface ClassStyle {
-  /** ink = base + gain · (1 − value)^gamma, value = light × albedo */
-  wash: [number, number, number];
-  /** contour weight, 0 … 1 */
-  line: number;
-  /** marks: amount 0 … 1, feature size on the screen (px) */
-  marks: [number, number];
+  /** ink = base + gain · (1 − value)^gamma + shadow · (in the sun's shadow), value = light × albedo */
+  wash: [number, number, number, number];
+  /** lines: silhouette weight, crease weight, crease threshold (1 − cos of the fold), width (px) */
+  line: [number, number, number, number];
+  /** marks: amount 0 … 1, feature size on the screen (px), kind (MARK) */
+  marks: [number, number, number];
   /** haze distance multiplier (far hills carry further) */
   haze: number;
   /** tint colour and amount (0 = ink only) */
@@ -39,37 +43,48 @@ export interface InkStyle {
 
 export const MAX_CLASSES = 32;
 
+const ARCH: Partial<ClassStyle> = { line: [0.8, 0.6, 0.22, 1.0] };
+
 export const DEFAULT_STYLE: InkStyle = {
   look: {
-    hazeDistance: 1100, skyLight: 0.55, sunLight: 0.6, paperDrift: 50,
-    paperColor: [0.94, 0.91, 0.84], paperTexture: 0.05, inkColor: [0.08, 0.075, 0.07], lineStrength: 0.9,
+    hazeDistance: 1400, skyLight: 0.5, sunLight: 0.65, paperDrift: 50,
+    paperColor: [0.94, 0.91, 0.84], paperTexture: 0.05, inkColor: [0.08, 0.075, 0.07], lineStrength: 1,
   },
-  base: { wash: [0.06, 0.55, 1.6], line: 0.8, marks: [0.5, 8], haze: 1, tint: [0, 0, 0, 0] },
+  base: { wash: [0.06, 0.4, 1.4, 0.3], line: [1.0, 0.0, 0.3, 1.4], marks: [0.4, 8, MARK.GRAIN], haze: 1, tint: [0, 0, 0, 0] },
   classes: {
-    [CLS.GROUND]: { wash: [0.02, 0.32, 1.8], line: 0.3, marks: [0.7, 10] },
-    [CLS.ROCK]: { wash: [0.05, 0.7, 1.3], line: 0.9, marks: [0.8, 6], haze: 2.2 },
-    [CLS.WATER]: { wash: [0.0, 0.12, 2.0], line: 0.0, marks: [0.6, 14] },
-    [CLS.ROOF]: { wash: [0.25, 0.6, 1.2], line: 1.0, marks: [0.3, 4] },
-    [CLS.WALL]: { wash: [0.0, 0.22, 2.0], line: 0.9, marks: [0.2, 8] },
-    [CLS.WOOD]: { wash: [0.2, 0.6, 1.3], line: 0.9 },
-    [CLS.STONE]: { wash: [0.03, 0.4, 1.5], line: 0.8 },
-    [CLS.PAVE]: { wash: [0.0, 0.2, 2.0], line: 0.5, marks: [0.3, 12] },
-    [CLS.BARK]: { wash: [0.3, 0.6, 1.0], line: 0.9 },
-    [CLS.WILLOW]: { wash: [0.08, 0.5, 1.4], line: 0.6, marks: [0.9, 5] },
-    [CLS.BROAD]: { wash: [0.12, 0.65, 1.2], line: 0.7, marks: [0.9, 5] },
-    [CLS.PINE]: { wash: [0.15, 0.7, 1.1], line: 0.7, marks: [0.9, 4] },
-    [CLS.MAPLE]: { wash: [0.1, 0.6, 1.2], line: 0.7, marks: [0.9, 5] },
-    [CLS.GINKGO]: { wash: [0.08, 0.55, 1.3], line: 0.7, marks: [0.9, 5] },
-    [CLS.BLOSSOM]: { wash: [0.02, 0.3, 1.5], line: 0.5, marks: [0.9, 4], tint: [0.85, 0.45, 0.5, 0.55] },
+    // the ground pale in the sun, the trees' shadows laid on it dark (ink02)
+    [CLS.GROUND]: { wash: [0.02, 0.12, 1.6, 0.42], line: [0.12, 0, 0.3, 1.2], marks: [0.35, 10, MARK.GRAIN] },
+    [CLS.SMALL]: { wash: [0.05, 0.16, 1.4, 0.35], line: [0.04, 0, 0.3, 0.8], marks: [0.8, 5, MARK.GRASS] },
+    [CLS.PAVE]: { wash: [0.02, 0.05, 1.5, 0.3], line: [0.25, 0, 0.3, 1.0], marks: [0.55, 8, MARK.PAVE] },
+    [CLS.ROCK]: { wash: [0.1, 0.55, 1.2, 0.3], line: [0.55, 0.15, 0.75, 1.6], marks: [0.8, 6, MARK.ROCK], haze: 2.2 },
+    [CLS.WATER]: { wash: [0.0, 0.05, 2.0, 0.1], line: [0, 0, 0.3, 1.0], marks: [0.0, 14, MARK.NONE] },
+    [CLS.ROOF]: { ...ARCH, wash: [0.45, 0.35, 1.2, 0.2], line: [0.8, 0.35, 0.6, 1.0], marks: [0.25, 4, MARK.GRAIN] },
+    [CLS.WOOD]: { ...ARCH, wash: [0.35, 0.4, 1.2, 0.2] },
+    [CLS.WALL]: { ...ARCH, wash: [0.02, 0.18, 1.8, 0.4], marks: [0.15, 8, MARK.GRAIN] },
+    [CLS.STONE]: { ...ARCH, wash: [0.06, 0.32, 1.4, 0.35], marks: [0.35, 6, MARK.GRAIN] },
+    [CLS.METAL]: { ...ARCH, wash: [0.4, 0.4, 1.0, 0.2] },
+    [CLS.DARK]: { ...ARCH, wash: [0.6, 0.3, 1.0, 0.1] },
+    [CLS.GLOW]: { ...ARCH, wash: [0.0, 0.1, 2.0, 0.1] },
+    [CLS.BARK]: { wash: [0.55, 0.3, 1.0, 0.15], line: [0.8, 0.1, 0.6, 1.4], marks: [0.3, 5, MARK.GRAIN] },
+    // trees: masses of wash and marks, outlines faint
+    [CLS.WILLOW]: { wash: [0.02, 0.08, 1.4, 0.12], line: [0.06, 0, 0.3, 0.8], marks: [0.6, 4, MARK.VEIL] },
+    [CLS.BROAD]: { wash: [0.12, 0.3, 1.2, 0.4], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
+    [CLS.PINE]: { wash: [0.16, 0.34, 1.1, 0.4], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 4, MARK.LEAF] },
+    [CLS.MAPLE]: { wash: [0.1, 0.3, 1.2, 0.35], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
+    [CLS.GINKGO]: { wash: [0.08, 0.28, 1.3, 0.35], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
+    [CLS.BLOSSOM]: { wash: [0.02, 0.07, 1.5, 0.1], line: [0.05, 0, 0.3, 0.8], marks: [0.7, 3, MARK.LEAF], tint: [0.86, 0.5, 0.52, 0.45] },
+    [CLS.BLOOM]: { wash: [0.02, 0.06, 1.5, 0.1], line: [0.75, 0.5, 0.2, 0.8], tint: [0.9, 0.55, 0.6, 0.4] },
+    [CLS.LOTUS]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.16, 0, 0.3, 1.0], marks: [0.6, 6, MARK.LEAF] },
+    [CLS.IVY]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.3, 0, 0.3, 0.8], marks: [0.6, 4, MARK.LEAF] },
   },
 };
 
-/** the table as the painter reads it: 3 × vec4 per class (src/shaders/ink.wgsl) */
+/** the table as the painter reads it: 4 × vec4 per class (src/shaders/ink.wgsl) */
 export function packStyle(s: InkStyle): Float32Array<ArrayBuffer> {
-  const out = new Float32Array(MAX_CLASSES * 12);
+  const out = new Float32Array(MAX_CLASSES * 16);
   for (let c = 0; c < MAX_CLASSES; c++) {
     const k = { ...s.base, ...(s.classes[c] ?? {}) };
-    out.set([...k.wash, k.line, ...k.marks, k.haze, 0, ...k.tint], c * 12);
+    out.set([...k.wash, ...k.line, ...k.marks, k.haze, ...k.tint], c * 16);
   }
   return out;
 }

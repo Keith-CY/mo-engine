@@ -5,7 +5,7 @@
  *
  * The far field is cut where the near field lies (its triangles there would fight with the near ones).
  */
-import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, VCLASS_OWN, heightAt, writeInstance, type Heightfield, type MeshData, type SceneData } from '../scene/types';
+import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, VCLASS_OWN, VCLASS_PAVE_BLEND, CLS, heightAt, writeInstance, type Heightfield, type MeshData, type SceneData } from '../scene/types';
 
 interface FieldPlan {
   field: Heightfield;
@@ -24,7 +24,7 @@ function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: numb
   if (n < 1 || m < 1) return null;
   const ox = f.origin[0] + i0 * c, oz = f.origin[1] + k0 * c;
   const H = (i: number, k: number) => f.heights[Math.min(f.depth - 1, k) * f.width + Math.min(f.width - 1, i)];
-  const pos: number[] = [], nrm: number[] = [], idx: number[] = [], vcls: number[] = [];
+  const pos: number[] = [], nrm: number[] = [], idx: number[] = [], vcls: number[] = [], uvs: number[] = [];
   const C = f.classes;
   const vert = (i: number, k: number, drop: number) => {
     const gi = i0 + i * step, gk = k0 + k * step;
@@ -33,8 +33,10 @@ function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: numb
     const l = Math.hypot(dx, 2 * c, dz);
     pos.push(gi * c + f.origin[0] - ox, h - drop, gk * c + f.origin[1] - oz);
     nrm.push(dx / l, (2 * c) / l, dz / l);
-    // (the class of the sample: paving where the field says so)
-    vcls.push(C ? C[Math.min(f.depth - 1, gk) * f.width + Math.min(f.width - 1, gi)] : VCLASS_OWN);
+    // (paving where the field says so: a weight the G-buffer interpolates, so the path's edge is smooth)
+    const sc = C ? C[Math.min(f.depth - 1, gk) * f.width + Math.min(f.width - 1, gi)] : 0;
+    vcls.push(C ? VCLASS_OWN | VCLASS_PAVE_BLEND : VCLASS_OWN);
+    uvs.push(sc === CLS.PAVE ? 1 : 0, 0);
     return pos.length / 3 - 1;
   };
   const grid: number[] = [];
@@ -71,6 +73,7 @@ function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: numb
   return {
     name: `terrain ${cx},${cz} /${step}`, cls, positions, normals: new Float32Array(nrm), tone, indices: new Uint32Array(idx),
     vclass: C ? new Uint32Array(vcls) : undefined,
+    uvs: C ? new Float32Array(uvs) : undefined,
     center, radius: Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2,
   };
 }

@@ -22,7 +22,8 @@ struct Frame {
   lightRot: mat4x4f,      // world → light space (rows: right, up, towards the sun)
   shadowVP: array<mat4x4f, 2>, // eye-relative world → each shadow cascade's clip space
   shadowBox: array<vec4f, 2>,  // each cascade in light space, eye-relative: centre (xy), half size, depth half range
-  counts: vec4f,          // slots, visible-list length per pass, cascades, unused
+  counts: vec4f,          // slots, visible-list length per pass, cascades, debug view (0 the painting)
+  paveField: vec4f,       // the paving map: world origin (x, z), 1 / its extent (x, z)
 };
 
 const CASCADES = 2u;

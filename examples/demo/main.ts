@@ -16,6 +16,15 @@ async function main(): Promise<void> {
   console.log(`[demo] engine in ${(performance.now() - t0).toFixed(0)} ms`);
   const scene = P.get('scene') ? await loadMoScene(P.get('scene')!) : syntheticTown(Number(P.get('seed')) || 1103, { heightfield: P.get('terrain') === '1' });
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
+  if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
+  // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
+  if (P.get('paper') === '0' || P.get('marks') === '0' || P.get('lines') === '0') {
+    const st = structuredClone(engine.renderer.style);
+    if (P.get('paper') === '0') st.look.paperTexture = 0;
+    if (P.get('lines') === '0') st.look.lineStrength = 0;
+    if (P.get('marks') === '0') { st.base.marks = [0, st.base.marks[1], st.base.marks[2]]; for (const c of Object.values(st.classes)) if (c?.marks) c.marks = [0, c.marks[1], c.marks[2]]; }
+    engine.renderer.setStyle(st);
+  }
   const stats = engine.setScene(scene);
   const vp = Number(P.get('vp'));
   if (vp && scene.viewpoints.find((v) => v.id === vp)) engine.goTo(scene.viewpoints.find((v) => v.id === vp)!);

@@ -18,7 +18,7 @@ import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 
-const FRAME_FLOATS = 200;
+const FRAME_FLOATS = 204;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -51,6 +51,11 @@ export class Renderer {
   /** the alpha mask of alpha-tested cards (the scene's first texture; 1 × 1 white without one) */
   private alphaTex?: GPUTexture;
   private alphaSampler!: GPUSampler;
+  /** the near terrain's paving map (1 on paving) and where it lies: origin x, z, 1 / extent x, z */
+  private paveTex?: GPUTexture;
+  private paveField: [number, number, number, number] = [0, 0, 0, 0];
+  /** the slab paths (src/shaders/gbuffer.wgsl pathAt) */
+  private pathBuf?: GPUBuffer;
   private shadowCmpSampler!: GPUSampler;
   private sampler: GPUSampler;
   private targets?: Targets;
@@ -74,6 +79,8 @@ export class Renderer {
   /** LOD distance scale (> 1: coarser sooner) and hysteresis */
   lodScale = 1;
   lodHysteresis = 0.08;
+  /** 0 the painting; 1 classes, 2 cast shadow (red) / sun (green) / sky (blue), 3 normals */
+  debugView = 0;
   /** frames over which a change of LOD level dissolves (0: at once) */
   lodFadeFrames = 24;
 
@@ -106,6 +113,8 @@ export class Renderer {
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'comparison' } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
       { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
     ] });
     const shadowFrame = d.createBindGroupLayout({ label: 'mo shadow frame layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
@@ -179,16 +188,57 @@ export class Renderer {
       d.queue.writeTexture({ texture: this.alphaTex }, new Uint8Array([255]), { bytesPerRow: 1 }, [1, 1]);
     }
     const alpha = this.alphaTex.createView();
+    if (!this.paveTex) {
+      this.paveTex = d.createTexture({ label: 'mo pave (none)', size: [1, 1], format: 'r8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      d.queue.writeTexture({ texture: this.paveTex }, new Uint8Array([0]), { bytesPerRow: 1 }, [1, 1]);
+    }
     this.frameBG = d.createBindGroup({ layout: this.layouts.frame, entries: [
       { binding: 0, resource: { buffer: this.frameBuf } },
       { binding: 1, resource: this.shadowMap.createView({ dimension: '2d-array' }) },
       { binding: 2, resource: this.shadowCmpSampler },
       { binding: 3, resource: alpha }, { binding: 4, resource: this.alphaSampler },
+      { binding: 5, resource: this.paveTex.createView() },
+      { binding: 6, resource: { buffer: this.pathBuf ?? (this.pathBuf = bufferFrom(d, new Float32Array(4), GPUBufferUsage.STORAGE, 'mo paths (none)')) } },
     ] });
     this.shadowFrameBG = d.createBindGroup({ layout: this.layouts.shadowFrame, entries: [
       { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: this.shadowPassBuf, size: 16 } },
       { binding: 2, resource: alpha }, { binding: 3, resource: this.alphaSampler },
     ] });
+  }
+
+  /** the scene's slab paths: up to 4 centre lines of up to 8 points, with their arc lengths */
+  private uploadPaths(data: SceneData): void {
+    const ps = (data.paths ?? []).slice(0, 4);
+    if (!ps.length) return;
+    const f = new Float32Array(4 + ps.length * 36);
+    f[0] = ps.length;
+    ps.forEach((p, k) => {
+      const pts = p.points.slice(0, 8);
+      f.set([pts.length, p.halfWidth, p.slab, p.crown], 4 + k * 36);
+      let s = 0;
+      pts.forEach((q, j) => {
+        if (j) s += Math.hypot(q[0] - pts[j - 1][0], q[1] - pts[j - 1][1]);
+        f.set([q[0], q[1], s, 0], 8 + k * 36 + j * 4);
+      });
+    });
+    this.pathBuf?.destroy();
+    this.pathBuf = bufferFrom(this.device, f, GPUBufferUsage.STORAGE, 'mo paths');
+  }
+
+  /** the near terrain's class map as a paving map (1 where it says PAVE) */
+  private uploadPave(data: SceneData): void {
+    const n = data.terrain?.near;
+    if (!n?.classes) return;
+    const PAVE = data.classes.PAVE ?? 27;
+    const m = new Uint8Array(n.width * n.depth);
+    for (let i = 0; i < m.length; i++) m[i] = n.classes[i] === PAVE ? 255 : 0;
+    const bpr = Math.ceil(n.width / 256) * 256, rows = new Uint8Array(bpr * n.depth);
+    for (let z = 0; z < n.depth; z++) rows.set(m.subarray(z * n.width, (z + 1) * n.width), z * bpr);
+    this.paveTex?.destroy();
+    this.paveTex = this.device.createTexture({ label: 'mo pave', size: [n.width, n.depth], format: 'r8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    this.device.queue.writeTexture({ texture: this.paveTex }, rows, { bytesPerRow: bpr }, [n.width, n.depth]);
+    // (texel centres at the samples: the map spans one cell more than the samples' extent)
+    this.paveField = [n.origin[0] - n.cell / 2, n.origin[1] - n.cell / 2, 1 / (n.width * n.cell), 1 / (n.depth * n.cell)];
   }
 
   /** the scene's alpha mask on the GPU, with coverage-preserving mip levels */
@@ -202,7 +252,6 @@ export class Renderer {
     mips.forEach((m, level) => this.device.queue.writeTexture({ texture: tex, mipLevel: level }, m.data, { bytesPerRow: m.width }, [m.width, m.height]));
     this.alphaTex?.destroy();
     this.alphaTex = tex;
-    this.bindFrame();
   }
 
   setStyle(style: InkStyle): void {
@@ -213,7 +262,10 @@ export class Renderer {
   setScene(data: SceneData): FrameStats {
     const d = this.device;
     const s = (this.scene = new GpuScene(d, data));
+    this.uploadPave(data);
+    this.uploadPaths(data);
     this.uploadAlpha(data);
+    this.bindFrame();
     this.sceneBG = d.createBindGroup({ layout: this.layouts.scene, entries: [
       { binding: 0, resource: { buffer: s.instances } }, { binding: 1, resource: { buffer: s.visible } },
       { binding: 2, resource: { buffer: s.lodState } },
@@ -303,7 +355,8 @@ export class Renderer {
     f.set([...L.paperColor, L.paperTexture], 132);
     f.set([...L.inkColor, L.lineStrength], 136);
     this.writeLight(f, e);
-    f.set([this.scene?.slots.length ?? 0, this.scene?.visibleTotal ?? 0, CASCADE_RADII.length, 0], 196);
+    f.set([this.scene?.slots.length ?? 0, this.scene?.visibleTotal ?? 0, CASCADE_RADII.length, this.debugView], 196);
+    f.set(this.paveField, 200);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];

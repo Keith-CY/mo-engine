@@ -15,6 +15,7 @@ interface SceneJson {
   terrain?: { near?: FieldJson; far?: FieldJson; class?: number };
   water?: SceneData['water']; sun?: { direction: [number, number, number] }; viewpoints?: SceneData['viewpoints'];
   textures?: TextureJson[];
+  paths?: SceneData['paths'];
 }
 
 async function fetchBuffer(url: URL): Promise<ArrayBuffer> {
@@ -63,6 +64,6 @@ export async function loadMoScene(base: string | URL): Promise<SceneData> {
     name: j.name, classes: j.classes, meshes, lodGroups: j.lodGroups ?? [], batches: j.batches,
     instances: inst, instanceCount: j.instanceCount,
     terrain: near || far ? { near, far, cls: j.terrain?.class ?? 1 } : undefined,
-    water: j.water ?? [], textures, sun: j.sun?.direction ?? [0.4, 0.5, -0.77], viewpoints: j.viewpoints ?? [],
+    water: j.water ?? [], textures, paths: j.paths ?? [], sun: j.sun?.direction ?? [0.4, 0.5, -0.77], viewpoints: j.viewpoints ?? [],
   };
 }

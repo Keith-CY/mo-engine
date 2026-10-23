@@ -44,6 +44,8 @@ export interface Heightfield {
   classes?: Uint8Array;
 }
 
+export interface PathData { name: string; points: [number, number][]; halfWidth: number; slab: number; crown: number }
+
 /** a one-channel texture (alpha masks), row-major, row 0 at v = 0 */
 export interface TextureData {
   name: string;
@@ -73,6 +75,9 @@ export interface SceneData {
   terrain?: { near?: Heightfield; far?: Heightfield; cls: number; drawn?: boolean };
   water: { name: string; level: number; mesh: number }[];
   textures?: TextureData[];
+  /** slab paths along centre lines (world X, Z): the ground within halfWidth and above `crown` m is paved, in courses
+   *  `slab` m long */
+  paths?: PathData[];
   /** towards the sun, unit length */
   sun: [number, number, number];
   viewpoints: Viewpoint[];
@@ -83,6 +88,8 @@ export const CLASS_OWN = 0xffffffff;
 export const FLAG_SHADOW = 1, FLAG_TWO_SIDED = 2, FLAG_WATER = 4;
 /** vclass: the mesh's own class (bits 0–15), alpha-tested (bit 16) */
 export const VCLASS_OWN = 0xffff, VCLASS_ALPHA = 0x10000;
+/** vclass bit 17: ground whose class is PAVE where its uv.x (a paving weight, interpolated) passes 0.5, else GROUND */
+export const VCLASS_PAVE_BLEND = 0x20000;
 
 /** the class ids the linan world uses (its src/ink/gbuffer.js CLS); a scene's own table wins */
 export const CLS = {

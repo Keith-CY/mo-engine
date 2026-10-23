@@ -1,7 +1,7 @@
 // The G-buffer: every visible instance once, three colour targets and reverse-Z depth.
 //   A  view normal (octahedral, 2) · view depth (m) · class id
-//   B  sun light (N·L) · sky light · albedo luminance · 0
-//   C  object seed · instance id · 0 · 0
+//   B  sun light (N·L × shadow) · sky light · albedo luminance · the cast shadow alone (1 lit)
+//   C  object seed · instance id · on paving: along the path (slabs, f32 bits) · across it (0 … 1, f32 bits)
 struct Draw {
   visibleBase: u32,
   cls: u32,       // the mesh's class (an instance may override it)
@@ -16,6 +16,32 @@ struct Draw {
 @group(0) @binding(2) var shadowCmp: sampler_comparison;
 @group(0) @binding(3) var alphaTex: texture_2d<f32>;
 @group(0) @binding(4) var alphaSamp: sampler;
+@group(0) @binding(5) var paveMap: texture_2d<f32>;    // 1 on paving, bilinear between the field's samples
+// the slab paths: [0].x their count; per path 9 vec4: (points, half width, slab length, crown height), then its points
+// (x, z, arc length at the point, 0)
+@group(0) @binding(6) var<storage, read> paths: array<vec4f>;
+
+/** the slab path at a ground point: (1 when paved, along it in slab lengths, across it 0 … 1) */
+fn pathAt(xz: vec2f, y: f32) -> vec3f {
+  let n = min(u32(paths[0].x), 4u);
+  var out = vec3f(0.0);
+  for (var k = 0u; k < n; k++) {
+    let h = paths[1u + k * 9u];
+    let np = min(u32(h.x), 8u);
+    var best = 1e10; var s = 0.0; var sd = 0.0;
+    for (var j = 0u; j + 1u < np; j++) {
+      let a = paths[2u + k * 9u + j]; let b = paths[3u + k * 9u + j];
+      let e = b.xy - a.xy; let len = max(length(e), 1e-3); let w = xz - a.xy;
+      let t = clamp(dot(w, e) / (len * len), 0.0, 1.0);
+      let d = length(w - e * t);
+      if (d < best) { best = d; s = a.z + t * len; sd = sign(e.x * w.y - e.y * w.x) * d; }
+    }
+    // (the edge wanders a little, as the terrain shader's does)
+    let edge = best - h.y + 0.12 * (vnoise(vec3f(s * 0.7, 3.0, 0.0)) - 0.5);
+    if (edge < 0.0 && y > h.w) { out = vec3f(1.0, s / h.z, clamp((sd + h.y) / (2.0 * h.y), 0.0, 1.0)); }
+  }
+  return out;
+}
 @group(1) @binding(0) var<storage, read> inst: array<u32>;
 @group(1) @binding(1) var<storage, read> visible: array<u32>;
 @group(1) @binding(2) var<storage, read> lodState: array<u32>;
@@ -34,6 +60,7 @@ struct VOut {
   @location(7) @interpolate(flat) fade: vec2f,
   @location(8) uv: vec2f,
   @location(9) @interpolate(flat) alpha: u32,   // 1: alpha-tested
+  @location(10) @interpolate(flat) paveBlend: u32,
 };
 
 fn col(i: u32, c: u32) -> vec3f {
@@ -59,6 +86,9 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
   o.cls = select(ic, select(vc, D.cls, vc == 0xffffu), ic == 0xffffffffu);
   o.uv = uv;
   o.alpha = (vcls >> 16u) & 1u;
+  // terrain: the class comes from the paving map, sampled per pixel at the world point (the same smooth path edge at
+  // every terrain level)
+  o.paveBlend = (vcls >> 17u) & 1u;
   o.seed = inst[i * 16u + 13u];
   o.id = i;
   o.tone = select(D.tone, tone, D.hasTone == 1u) * bitcast<f32>(inst[i * 16u + 14u]);
@@ -100,6 +130,8 @@ fn shadowAt(rel: vec3f, nW: vec3f) -> f32 {
 fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   // (sampled before any branch: an implicit-derivative sample needs uniform control flow)
   let a = textureSample(alphaTex, alphaSamp, v.uv).r;
+  let wp = v.rel + F.eye.xyz;
+  let pave = textureSampleLevel(paveMap, alphaSamp, (wp.xz - F.paveField.xy) * F.paveField.zw, 0.0).r;
   if (v.alpha == 1u && a < D.cutoff) { discard; }
   if (v.fade.y != 0.0) {
     // the dither cell: about a pixel at this distance, fixed to the world
@@ -111,9 +143,22 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   if (!front) { nW = -nW; }
   let nV = normalize((F.viewRot * vec4f(nW, 0.0)).xyz);
   var o: GOut;
-  o.a = vec4f(octEncode(nV), v.depth, f32(v.cls));
+  var cls = v.cls;
+  var along = 0.0; var across = 0.0;
+  if (v.paveBlend == 1u) {
+    if (paths[0].x > 0.0) {
+      let pa = pathAt(wp.xz, wp.y);
+      cls = select(1u, 27u, pa.x > 0.5);
+      along = pa.y; across = pa.z;
+    } else {
+      cls = select(1u, 27u, pave > 0.5);
+    }
+  }
+  o.a = vec4f(octEncode(nV), v.depth, f32(cls));
   let ndl = max(dot(nW, F.sun.xyz), 0.0);
-  o.b = vec4f(ndl * select(1.0, shadowAt(v.rel, nW), ndl > 0.0), 0.5 + 0.5 * nW.y, v.tone, 0.0);
-  o.c = vec4u(v.seed, v.id, 0u, 0u);
+  // the cast shadow is taken along the geometric normal's sun side: a face turned away gets none of its own
+  let sh = shadowAt(v.rel, nW);
+  o.b = vec4f(ndl * sh, 0.5 + 0.5 * nW.y, v.tone, sh);
+  o.c = vec4u(v.seed, v.id, bitcast<u32>(along), bitcast<u32>(across));
   return o;
 }
