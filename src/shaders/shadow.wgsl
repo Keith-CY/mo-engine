@@ -7,6 +7,8 @@ struct Draw { visibleBase: u32, cls: u32, tone: f32, hasTone: u32, level: u32, c
 @group(0) @binding(1) var<uniform> S: Pass;
 @group(0) @binding(2) var alphaTex: texture_2d<f32>;
 @group(0) @binding(3) var alphaSamp: sampler;
+@group(0) @binding(4) var nearField: texture_2d<f32>;
+@group(0) @binding(5) var farField: texture_2d<f32>;
 @group(1) @binding(0) var<storage, read> inst: array<u32>;
 @group(1) @binding(1) var<storage, read> visible: array<u32>;
 @group(2) @binding(0) var<uniform> D: Draw;
@@ -25,7 +27,8 @@ fn col(i: u32, c: u32) -> vec3f {
 @vertex
 fn vs(@location(0) p: vec3f, @location(1) uv: vec2f, @location(2) vcls: u32, @builtin(instance_index) ii: u32) -> VOut {
   let i = visible[S.visOffset + D.visibleBase + ii];
-  let rel = col(i, 0u) * p.x + col(i, 1u) * p.y + col(i, 2u) * p.z + (col(i, 3u) - F.eye.xyz);
+  var rel = col(i, 0u) * p.x + col(i, 1u) * p.y + col(i, 2u) * p.z + (col(i, 3u) - F.eye.xyz);
+  if ((vcls & VC_TERRAIN) != 0u) { rel = liftTerrain(rel, vcls, uv.x, length(col(i, 0u))).rel; }
   var o: VOut;
   o.pos = F.shadowVP[S.cascade] * vec4f(rel, 1.0);
   o.uv = uv;

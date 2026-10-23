@@ -1,125 +1,102 @@
 /**
- * Terrain from the scene's heightfields as chunks: each chunk is a LOD group of grids with coarser and coarser cells,
- * with skirts (a strip hanging down along every edge) hiding the cracks where neighbours sit at different levels.
- * Chunks are ordinary instances, so they go through the same culling and distance-only LOD as everything else.
+ * Terrain from the scene's heightfields, drawn on the GPU: each field is a texture (src/render/renderer.ts uploads
+ * them) and the ground is a few shared grid meshes on the unit square, one per level of detail (cells coarser and
+ * coarser), with skirts hanging down along every edge to hide the cracks where neighbours sit at different levels.
+ * Each chunk of a field is one instance of the field's LOD group, so the chunks go through the same culling and
+ * distance-only LOD as everything else; the vertex shaders lift every grid vertex to the field's height there and take
+ * its normal from the field (src/shaders/terrain.wgsl). A city's terrain then costs its textures and a few thousand
+ * instances, not millions of vertices.
  *
- * The far field is cut where the near field lies (its triangles there would fight with the near ones).
+ * The far field gives way where the near field lies: its vertices there sink under it.
  */
-import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, VCLASS_OWN, VCLASS_PAVE_BLEND, CLS, heightAt, writeInstance, type Heightfield, type MeshData, type SceneData } from '../scene/types';
+import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, VCLASS_OWN, VCLASS_PAVE_BLEND, heightAt, writeInstance, type Heightfield, type MeshData, type SceneData } from '../scene/types';
 
-interface FieldPlan {
-  field: Heightfield;
-  /** cells per chunk side */
-  chunk: number;
-  /** each level's step (cells) and the distance it is used up to (m) */
-  levels: { step: number; to: number }[];
-  /** world XZ box whose triangles are left out (the near field, for the far one) */
-  hole?: [number, number, number, number];
-}
+/** vclass bits of terrain vertices: lifted to a field (18), the far field (19), a skirt vertex (20) */
+export const VCLASS_TERRAIN = 1 << 18, VCLASS_FAR = 1 << 19, VCLASS_SKIRT = 1 << 20;
 
-function chunkMesh(p: FieldPlan, cx: number, cz: number, step: number, cls: number, tone: number): MeshData | null {
-  const f = p.field, c = f.cell;
-  const i0 = cx * p.chunk, k0 = cz * p.chunk;
-  const n = Math.floor(Math.min(p.chunk, f.width - 1 - i0) / step), m = Math.floor(Math.min(p.chunk, f.depth - 1 - k0) / step);
-  if (n < 1 || m < 1) return null;
-  const ox = f.origin[0] + i0 * c, oz = f.origin[1] + k0 * c;
-  const H = (i: number, k: number) => f.heights[Math.min(f.depth - 1, k) * f.width + Math.min(f.width - 1, i)];
-  const pos: number[] = [], nrm: number[] = [], idx: number[] = [], vcls: number[] = [], uvs: number[] = [];
-  const C = f.classes;
-  const vert = (i: number, k: number, drop: number) => {
-    const gi = i0 + i * step, gk = k0 + k * step;
-    const h = H(gi, gk);
-    const dx = H(Math.max(0, gi - 1), gk) - H(gi + 1, gk), dz = H(gi, Math.max(0, gk - 1)) - H(gi, gk + 1);
-    const l = Math.hypot(dx, 2 * c, dz);
-    pos.push(gi * c + f.origin[0] - ox, h - drop, gk * c + f.origin[1] - oz);
-    nrm.push(dx / l, (2 * c) / l, dz / l);
-    // (paving where the field says so: a weight the G-buffer interpolates, so the path's edge is smooth)
-    const sc = C ? C[Math.min(f.depth - 1, gk) * f.width + Math.min(f.width - 1, gi)] : 0;
-    vcls.push(C ? VCLASS_OWN | VCLASS_PAVE_BLEND : VCLASS_OWN);
-    uvs.push(sc === CLS.PAVE ? 1 : 0, 0);
+/** a grid of n × n cells on the unit square (x, z), its skirt ring after it; uv.x carries n (the shaders' cell size) */
+function gridMesh(name: string, n: number, cls: number, tone: number, bits: number): MeshData {
+  const pos: number[] = [], vcls: number[] = [], uvs: number[] = [], idx: number[] = [];
+  const vert = (i: number, k: number, skirt: boolean) => {
+    pos.push(i / n, 0, k / n);
+    vcls.push(VCLASS_OWN | bits | (skirt ? VCLASS_SKIRT : 0));
+    uvs.push(n, 0);
     return pos.length / 3 - 1;
   };
-  const grid: number[] = [];
-  for (let k = 0; k <= m; k++) for (let i = 0; i <= n; i++) grid.push(vert(i, k, 0));
-  const inHole = (i: number, k: number) => {
-    if (!p.hole) return false;
-    const x = ox + (i + 0.5) * step * c, z = oz + (k + 0.5) * step * c;
-    return x > p.hole[0] && x < p.hole[2] && z > p.hole[1] && z < p.hole[3];
-  };
-  for (let k = 0; k < m; k++) for (let i = 0; i < n; i++) {
-    if (inHole(i, k)) continue;
-    const a = grid[k * (n + 1) + i], b = a + 1, d = grid[(k + 1) * (n + 1) + i], e = d + 1;
+  for (let k = 0; k <= n; k++) for (let i = 0; i <= n; i++) vert(i, k, false);
+  for (let k = 0; k < n; k++) for (let i = 0; i < n; i++) {
+    const a = k * (n + 1) + i, b = a + 1, d = a + n + 1, e = d + 1;
     idx.push(a, d, b, b, d, e);
   }
-  if (!idx.length) return null;
-  // skirts: each edge's vertices again, dropped by a few cells' worth, joined to the edge
-  const drop = 2 + step * c * 0.5;
   const edge = (cells: [number, number][]) => {
     let prevTop = -1, prevLow = -1;
     for (const [i, k] of cells) {
-      const top = grid[k * (n + 1) + i], low = vert(i, k, drop);
+      const top = k * (n + 1) + i, low = vert(i, k, true);
       if (prevTop >= 0) idx.push(prevTop, prevLow, top, top, prevLow, low);
       prevTop = top; prevLow = low;
     }
   };
   edge(Array.from({ length: n + 1 }, (_, i) => [i, 0] as [number, number]));
-  edge(Array.from({ length: n + 1 }, (_, i) => [n - i, m] as [number, number]));
-  edge(Array.from({ length: m + 1 }, (_, k) => [0, m - k] as [number, number]));
-  edge(Array.from({ length: m + 1 }, (_, k) => [n, k] as [number, number]));
-  const positions = new Float32Array(pos);
-  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (let v = 0; v < positions.length; v += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], positions[v + a]); hi[a] = Math.max(hi[a], positions[v + a]); }
-  const center: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  edge(Array.from({ length: n + 1 }, (_, i) => [n - i, n] as [number, number]));
+  edge(Array.from({ length: n + 1 }, (_, k) => [0, n - k] as [number, number]));
+  edge(Array.from({ length: n + 1 }, (_, k) => [n, k] as [number, number]));
+  const nv = pos.length / 3;
+  const normals = new Float32Array(nv * 3);
+  for (let v = 0; v < nv; v++) normals[v * 3 + 1] = 1;
   return {
-    name: `terrain ${cx},${cz} /${step}`, cls, positions, normals: new Float32Array(nrm), tone, indices: new Uint32Array(idx),
-    vclass: C ? new Uint32Array(vcls) : undefined,
-    uvs: C ? new Float32Array(uvs) : undefined,
-    center, radius: Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2,
+    name, cls, positions: new Float32Array(pos), normals, tone, indices: new Uint32Array(idx),
+    vclass: new Uint32Array(vcls), uvs: new Float32Array(uvs), center: [0.5, 0, 0.5], radius: 1,
   };
 }
 
-/** adds the terrain of `scene.terrain` to the scene as chunked LOD meshes (returns the same scene) */
+/** adds the terrain of `scene.terrain` to the scene: per field a LOD group of grids and an instance per chunk */
 export function addTerrain(scene: SceneData, tone = 0.62): SceneData {
   const t = scene.terrain;
   if (!t) return scene;
-  const plans: FieldPlan[] = [];
-  // chunks big enough that a field makes at most ~300 of them (each chunk level is one draw per pass)
-  const chunkFor = (f: Heightfield, min: number) => Math.max(min, 2 ** Math.ceil(Math.log2(Math.sqrt((f.width * f.depth) / 300))));
-  if (t.near) {
-    const chunk = chunkFor(t.near, 128), span = t.near.cell * chunk;
-    plans.push({ field: t.near, chunk, levels: [{ step: 1, to: span * 1.2 }, { step: 4, to: span * 5 }, { step: 16, to: 1e5 }] });
-  }
-  if (t.far) {
-    const chunk = chunkFor(t.far, 64), span = t.far.cell * chunk;
-    const n = t.near;
-    const hole: FieldPlan['hole'] = n ? [n.origin[0] + n.cell, n.origin[1] + n.cell, n.origin[0] + (n.width - 2) * n.cell, n.origin[1] + (n.depth - 2) * n.cell] : undefined;
-    plans.push({ field: t.far, chunk, levels: [{ step: 1, to: span * 1.5 }, { step: 4, to: span * 6 }, { step: 16, to: 1e6 }], hole });
-  }
-  const added: { group: number; x: number; y: number; z: number }[] = [];
-  for (const p of plans) {
-    const f = p.field;
-    const nx = Math.ceil((f.width - 1) / p.chunk), nz = Math.ceil((f.depth - 1) / p.chunk);
+  const added: { group: number; m: number[] }[] = [];
+  const plan = (f: Heightfield, far: boolean) => {
+    // 64 cells a chunk; the levels' grids 64, 16 and 4 cells a side, used up to a few chunk spans
+    const N = 64, span = f.cell * N;
+    const to = far ? [span * 1.5, span * 6, 1e6] : [span * 1.2, span * 5, 1e5];
+    const bits = VCLASS_TERRAIN | (far ? VCLASS_FAR : 0) | (!far && f.classes ? VCLASS_PAVE_BLEND : 0);
+    const levels = [N, 16, 4].map((n, li) => ({ mesh: scene.meshes.push(gridMesh(`terrain ${far ? 'far' : 'near'} /${N / n}`, n, t.cls, tone, bits)) - 1, to: to[li] }));
+    // (bounds in the instance's space: the chunk's centre; its radius is the instance's largest axis, below)
+    const group = scene.lodGroups.push({ name: `terrain ${far ? 'far' : 'near'}`, levels, bounds: { center: [0.5, 0, 0.5], radius: 1 } }) - 1;
+    const nx = Math.ceil((f.width - 1) / N), nz = Math.ceil((f.depth - 1) / N);
+    const list: number[] = [];
     for (let cz = 0; cz < nz; cz++) for (let cx = 0; cx < nx; cx++) {
-      const levels: { mesh: number; to: number }[] = [];
-      for (const l of p.levels) {
-        const m = chunkMesh(p, cx, cz, l.step, t.cls, tone);
-        if (!m) break;
-        levels.push({ mesh: scene.meshes.push(m) - 1, to: l.to });
+      const i0 = cx * N, k0 = cz * N;
+      let lo = Infinity, hi = -Infinity;
+      for (let k = k0; k <= Math.min(f.depth - 1, k0 + N); k += 2) for (let i = i0; i <= Math.min(f.width - 1, i0 + N); i += 2) {
+        const h = f.heights[k * f.width + i];
+        if (h < lo) lo = h;
+        if (h > hi) hi = h;
       }
-      if (!levels.length) continue;
-      const group = scene.lodGroups.push({ name: `terrain ${cx},${cz}`, levels }) - 1;
-      added.push({ group, x: f.origin[0] + cx * p.chunk * f.cell, y: 0, z: f.origin[1] + cz * p.chunk * f.cell });
+      if (!(hi >= lo)) continue;
+      const x0 = f.origin[0] + i0 * f.cell, z0 = f.origin[1] + k0 * f.cell;
+      // the Y axis (unused by the lifted vertices) sets the culling radius: the chunk's half diagonal and half height
+      const r = Math.max(span, Math.hypot(span * 0.71, (hi - lo) / 2 + 2));
+      list.push(x0, (lo + hi) / 2, z0, span, r);
     }
-  }
-  // the chunks' instances, after the scene's own
-  const old = scene.instanceCount, count = old + added.length;
+    added.push({ group, m: list });
+  };
+  if (t.near) plan(t.near, false);
+  if (t.far) plan(t.far, true);
+  const n = added.reduce((s, a) => s + a.m.length / 5, 0);
+  const old = scene.instanceCount, count = old + n;
   const buf = new ArrayBuffer(count * INSTANCE_BYTES);
   new Uint8Array(buf).set(new Uint8Array(scene.instances, 0, old * INSTANCE_BYTES));
   const view = new DataView(buf);
-  added.forEach((a, k) => {
-    writeInstance(view, old + k, [1, 0, 0, 0, 1, 0, 0, 0, 1, a.x, a.y, a.z], CLASS_OWN, (0x7e44a1 ^ Math.imul(a.group, 2654435761)) >>> 0, 1, FLAG_SHADOW);
-    scene.batches.push({ lodGroup: a.group, first: old + k, count: 1 });
-  });
+  let k = old;
+  for (const a of added) {
+    const first = k;
+    for (let j = 0; j < a.m.length; j += 5) {
+      const [x, y, z, s, r] = a.m.slice(j, j + 5);
+      writeInstance(view, k, [s, 0, 0, 0, r, 0, 0, 0, s, x, y, z], CLASS_OWN, (0x7e44a1 ^ Math.imul(k, 2654435761)) >>> 0, 1, FLAG_SHADOW);
+      k++;
+    }
+    if (k > first) scene.batches.push({ lodGroup: a.group, first, count: k - first });
+  }
   scene.instances = buf;
   scene.instanceCount = count;
   return scene;

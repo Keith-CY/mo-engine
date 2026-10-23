@@ -21,6 +21,8 @@ struct Draw {
 // the slab paths: [0].x their count; per path 9 vec4: (points, half width, slab length, crown height), then its points
 // (x, z, arc length at the point, 0)
 @group(0) @binding(6) var<storage, read> paths: array<vec4f>;
+@group(0) @binding(7) var nearField: texture_2d<f32>;
+@group(0) @binding(8) var farField: texture_2d<f32>;
 
 fn hash11(x: f32) -> f32 { return hash3(vec3i(bitcast<i32>(x), 101, 7)); }
 
@@ -92,12 +94,14 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
       @builtin(instance_index) ii: u32) -> VOut {
   let i = visible[D.visibleBase + ii];
   let X = col(i, 0u); let Y = col(i, 1u); let Z = col(i, 2u); let T = col(i, 3u);
-  let rel = X * p.x + Y * p.y + Z * p.z + (T - F.eye.xyz);
+  var rel = X * p.x + Y * p.y + Z * p.z + (T - F.eye.xyz);
   var o: VOut;
-  o.pos = F.viewProj * vec4f(rel, 1.0);
-  o.rel = rel;
   // (uniformly scaled instances: the normal goes through the same axes; the scenes keep scale near uniform)
   o.nW = X * n.x + Y * n.y + Z * n.z;
+  // terrain: the grid lifted onto its field (src/shaders/terrain.wgsl)
+  if ((vcls & VC_TERRAIN) != 0u) { let L = liftTerrain(rel, vcls, uv.x, length(X)); rel = L.rel; o.nW = L.nW; }
+  o.pos = F.viewProj * vec4f(rel, 1.0);
+  o.rel = rel;
   o.depth = -(F.viewRot * vec4f(rel, 1.0)).z;
   // the class: the instance's, else the triangle's own (the vertex's class word), else the mesh's
   let ic = inst[i * 16u + 12u];

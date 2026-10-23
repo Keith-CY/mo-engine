@@ -17,8 +17,9 @@ import INK from '../shaders/ink.wgsl';
 import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
+import TERRAIN from '../shaders/terrain.wgsl';
 
-const FRAME_FLOATS = 276;
+const FRAME_FLOATS = 292;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -116,12 +117,16 @@ export class Renderer {
       { binding: 4, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
       { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
       { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
+      { binding: 7, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 8, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'unfilterable-float' } },
     ] });
     const shadowFrame = d.createBindGroupLayout({ label: 'mo shadow frame layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 4, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 5, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'unfilterable-float' } },
     ] });
     const scene = d.createBindGroupLayout({ label: 'mo scene layout', entries: [
       { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
@@ -136,8 +141,8 @@ export class Renderer {
     const pass = new Uint32Array(CASCADE_RADII.length * 64);
     CASCADE_RADII.forEach((_, k) => pass.set([k, 0, 0, 0], k * 64));
     d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
-    const smod = mod('mo shadow', SHADOW);
-    const gmod = mod('mo gbuffer', GBUFFER);
+    const smod = mod('mo shadow', SHADOW + '\n' + TERRAIN);
+    const gmod = mod('mo gbuffer', GBUFFER + '\n' + TERRAIN);
     const fullscreen = (label: string, code: string, format: GPUTextureFormat) => {
       const m = mod(label, code);
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
@@ -251,10 +256,12 @@ export class Renderer {
       { binding: 3, resource: alpha }, { binding: 4, resource: this.alphaSampler },
       { binding: 5, resource: this.paveTex.createView() },
       { binding: 6, resource: { buffer: this.pathBuf ?? (this.pathBuf = bufferFrom(d, new Float32Array(4), GPUBufferUsage.STORAGE, 'mo paths (none)')) } },
+      { binding: 7, resource: this.fieldView(0) }, { binding: 8, resource: this.fieldView(1) },
     ] });
     this.shadowFrameBG = d.createBindGroup({ layout: this.layouts.shadowFrame, entries: [
       { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: this.shadowPassBuf, size: 16 } },
       { binding: 2, resource: alpha }, { binding: 3, resource: this.alphaSampler },
+      { binding: 4, resource: this.fieldView(0) }, { binding: 5, resource: this.fieldView(1) },
     ] });
     this.bundles = undefined;
   }
@@ -276,6 +283,38 @@ export class Renderer {
     });
     this.pathBuf?.destroy();
     this.pathBuf = bufferFrom(this.device, f, GPUBufferUsage.STORAGE, 'mo paths');
+  }
+
+  /** the heightfields as textures the terrain's vertices are lifted from (src/shaders/terrain.wgsl) */
+  private fieldTex: (GPUTexture | undefined)[] = [undefined, undefined];
+  private fieldInfo = new Float32Array(16);
+  private fieldView(k: number): GPUTextureView {
+    if (!this.fieldTex[k]) {
+      const t = this.device.createTexture({ label: 'mo field (none)', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      this.device.queue.writeTexture({ texture: t }, new Float32Array([0]), { bytesPerRow: 4 }, [1, 1]);
+      this.fieldTex[k] = t;
+    }
+    return this.fieldTex[k]!.createView();
+  }
+  private uploadFields(data: SceneData): void {
+    const fields = [data.terrain?.near, data.terrain?.far];
+    this.fieldInfo.fill(0);
+    fields.forEach((f, k) => {
+      this.fieldTex[k]?.destroy();
+      this.fieldTex[k] = undefined;
+      if (!f || data.terrain?.drawn === false) return;
+      const t = this.device.createTexture({ label: `mo field ${k ? 'far' : 'near'}`, size: [f.width, f.depth], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+      // (rows padded to 256 bytes, in bands so no large copy is made)
+      const bpr = Math.ceil((f.width * 4) / 256) * 256, rowsPer = Math.max(1, Math.floor((16 << 20) / bpr));
+      for (let z0 = 0; z0 < f.depth; z0 += rowsPer) {
+        const rows = Math.min(rowsPer, f.depth - z0);
+        const band = new Float32Array((bpr / 4) * rows);
+        for (let z = 0; z < rows; z++) band.set(f.heights.subarray((z0 + z) * f.width, (z0 + z + 1) * f.width), (z * bpr) / 4);
+        this.device.queue.writeTexture({ texture: t, origin: [0, z0] }, band, { bytesPerRow: bpr }, [f.width, rows]);
+      }
+      this.fieldTex[k] = t;
+      this.fieldInfo.set([f.origin[0], f.origin[1], f.cell, f.width, f.depth, 1, 0, 0], k * 8);
+    });
   }
 
   /** the near terrain's class map as a paving map (1 where it says PAVE) */
@@ -315,6 +354,7 @@ export class Renderer {
   setScene(data: SceneData): FrameStats {
     const d = this.device;
     const s = (this.scene = new GpuScene(d, data));
+    this.uploadFields(data);
     this.uploadPave(data);
     this.uploadPaths(data);
     if (this.targets && this.passBGs) this.passBGs.ink = this.inkBindGroup(this.targets);
@@ -425,6 +465,7 @@ export class Renderer {
     f.set(L.gains ?? [1, 1, 1, 1], 264);
     f.set([L.lineNear ?? 8, L.lineFar ?? 900, L.snow ?? 0, 0], 268);
     f.set([...(L.veil ?? [0, 0, 0]), 0], 272);
+    f.set(this.fieldInfo, 276);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];

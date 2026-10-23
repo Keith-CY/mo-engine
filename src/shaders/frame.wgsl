@@ -40,6 +40,10 @@ struct Frame {
   gains: vec4f,           // crown ink, roof ink, leaf marks, joints (1: as the 苏堤 look)
   lines: vec4f,           // lines full at this distance (m), gone at this one (log scale); snow (0 … 1); unused
   veil: vec4f,            // the woods paling upward into haze: from y0 to y1 (m), amount; unused
+  fieldNear: vec4f,       // the near heightfield texture: origin (x, z), cell (m), width (samples)
+  fieldNearB: vec4f,      // … depth (samples), 1 when there is one
+  fieldFar: vec4f,        // the far one
+  fieldFarB: vec4f,
 };
 
 const CASCADES = 2u;
