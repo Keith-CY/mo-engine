@@ -20,7 +20,7 @@
 @group(0) @binding(5) var<storage, read> style: array<vec4f>;
 
 const C_GROUND = 1u; const C_WATER = 3u; const C_SMALL = 15u; const C_PAVE = 27u;
-const M_GRAIN = 1u; const M_LEAF = 2u; const M_VEIL = 3u; const M_GRASS = 4u; const M_PAVE = 5u; const M_ROCK = 6u;
+const M_GRAIN = 1u; const M_LEAF = 2u; const M_VEIL = 3u; const M_GRASS = 4u; const M_PAVE = 5u; const M_ROCK = 6u; const M_MASONRY = 7u;
 
 struct VOut { @builtin(position) pos: vec4f };
 
@@ -152,6 +152,19 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let seen = 1.0 - smoothstep(0.06, 0.18, footprint / 1.15);
     mark = (1.0 - smoothstep(jw * 0.5, jw * 1.6, dm)) * seen;
     ink += 0.04 * (hash3(vec3i(i32(rb), i32(floor(x * nA)), 5)) - 0.5);
+  } else if (kind == M_MASONRY) {
+    // dressed stone: courses 0.42 m high, blocks 0.9 m long in running bond, laid along the face (the face's own
+    // horizontal: across its normal); on near-flat tops the joints run along the world's x
+    let t = normalize(select(vec3f(1.0, 0.0, 0.0), vec3f(-nW.z, 0.0, nW.x), abs(nW.y) < 0.8));
+    let along = dot(P, t);
+    let up = select(dot(P.xz, vec2f(-t.z, t.x)), P.y, abs(nW.y) < 0.8);
+    let row = floor(up / 0.42);
+    let dv = abs(fract(up / 0.42 + 0.5) - 0.5) * 0.42;
+    let off = select(0.0, 0.45, (i32(row) & 1) == 1);
+    let dh = abs(fract((along + off) / 0.9 + 0.5) - 0.5) * 0.9;
+    let jw = max(footprint * 0.8, 0.01);
+    let seen = 1.0 - smoothstep(0.03, 0.09, footprint / 0.42);
+    mark = (1.0 - smoothstep(jw * 0.5, jw * 1.6, min(dv, dh))) * seen;
   } else if (kind == M_ROCK) {
     // 皴: broken strokes across the rock
     let g = zoomNoise(P * vec3f(1.0, 0.6, 1.0), footprint, s2.y, seed);
@@ -161,10 +174,13 @@ fn fs(v: VOut) -> @location(0) vec4f {
 
   // the far land: hills carry a wash of their own (steeper is darker), graded into the haze below
   var hazeScale = s2.w;
+  var lineK = 1.0;
   if (cls == C_GROUND) {
     let far = smoothstep(350.0, 2200.0, dist);
-    ink = mix(ink, 0.22 + 0.45 * (1.0 - clamp(nW.y, 0.0, 1.0)) + 0.15 * shade, far);
-    hazeScale *= mix(1.0, 4.0, far);
+    ink = mix(ink, 0.24 + 0.45 * (1.0 - clamp(nW.y, 0.0, 1.0)) + 0.15 * shade, far);
+    hazeScale *= mix(1.0, 6.0, far);
+    // the far hills' ridges drawn
+    lineK = mix(1.0, 5.0, far);
   }
 
   // lines: a 1 px cross, and a second ring for lines wider than 1 px; thinner with distance
@@ -182,7 +198,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     e2 = max(e2, edgeTo(A, nV, cls, p, vec2i(0, -2), s1));
     edge = max(edge, e2 * ring2 * 0.7);
   }
-  edge *= mix(1.0, 0.6, smoothstep(60.0, 600.0, dist));
+  edge *= mix(1.0, 0.6, smoothstep(60.0, 600.0, dist)) * lineK;
   ink = max(ink, edge * F.ink.w);
 
   // into the haze: ink fades with distance (the class can carry further: far hills)

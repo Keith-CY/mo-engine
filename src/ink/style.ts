@@ -7,7 +7,7 @@
 import { CLS } from '../scene/types';
 
 /** what a class's marks are (src/shaders/ink.wgsl) */
-export const MARK = { NONE: 0, GRAIN: 1, LEAF: 2, VEIL: 3, GRASS: 4, PAVE: 5, ROCK: 6 } as const;
+export const MARK = { NONE: 0, GRAIN: 1, LEAF: 2, VEIL: 3, GRASS: 4, PAVE: 5, ROCK: 6, MASONRY: 7 } as const;
 
 export interface ClassStyle {
   /** ink = base + gain · (1 − value)^gamma + shadow · (in the sun's shadow), value = light × albedo */
@@ -53,21 +53,21 @@ export const DEFAULT_STYLE: InkStyle = {
   base: { wash: [0.06, 0.4, 1.4, 0.3], line: [1.0, 0.0, 0.3, 1.4], marks: [0.4, 8, MARK.GRAIN], haze: 1, tint: [0, 0, 0, 0] },
   classes: {
     // the ground pale in the sun, the trees' shadows laid on it dark (ink02)
-    [CLS.GROUND]: { wash: [0.02, 0.12, 1.6, 0.42], line: [0.12, 0, 0.3, 1.2], marks: [0.35, 10, MARK.GRAIN] },
-    [CLS.SMALL]: { wash: [0.05, 0.16, 1.4, 0.35], line: [0.04, 0, 0.3, 0.8], marks: [0.8, 5, MARK.GRASS] },
+    [CLS.GROUND]: { wash: [0.03, 0.16, 1.5, 0.6], line: [0.12, 0, 0.3, 1.2], marks: [0.45, 10, MARK.GRAIN] },
+    [CLS.SMALL]: { wash: [0.08, 0.22, 1.3, 0.5], line: [0.04, 0, 0.3, 0.8], marks: [0.85, 5, MARK.GRASS] },
     [CLS.PAVE]: { wash: [0.02, 0.05, 1.5, 0.3], line: [0.25, 0, 0.3, 1.0], marks: [0.55, 8, MARK.PAVE] },
     [CLS.ROCK]: { wash: [0.1, 0.55, 1.2, 0.3], line: [0.55, 0.15, 0.75, 1.6], marks: [0.8, 6, MARK.ROCK], haze: 2.2 },
     [CLS.WATER]: { wash: [0.0, 0.05, 2.0, 0.1], line: [0, 0, 0.3, 1.0], marks: [0.0, 14, MARK.NONE] },
     [CLS.ROOF]: { ...ARCH, wash: [0.45, 0.35, 1.2, 0.2], line: [0.8, 0.35, 0.6, 1.0], marks: [0.25, 4, MARK.GRAIN] },
     [CLS.WOOD]: { ...ARCH, wash: [0.35, 0.4, 1.2, 0.2] },
     [CLS.WALL]: { ...ARCH, wash: [0.02, 0.18, 1.8, 0.4], marks: [0.15, 8, MARK.GRAIN] },
-    [CLS.STONE]: { ...ARCH, wash: [0.06, 0.32, 1.4, 0.35], marks: [0.35, 6, MARK.GRAIN] },
+    [CLS.STONE]: { ...ARCH, wash: [0.04, 0.2, 1.5, 0.25], marks: [0.6, 6, MARK.MASONRY] },
     [CLS.METAL]: { ...ARCH, wash: [0.4, 0.4, 1.0, 0.2] },
     [CLS.DARK]: { ...ARCH, wash: [0.6, 0.3, 1.0, 0.1] },
     [CLS.GLOW]: { ...ARCH, wash: [0.0, 0.1, 2.0, 0.1] },
     [CLS.BARK]: { wash: [0.55, 0.3, 1.0, 0.15], line: [0.8, 0.1, 0.6, 1.4], marks: [0.3, 5, MARK.GRAIN] },
     // trees: masses of wash and marks, outlines faint
-    [CLS.WILLOW]: { wash: [0.02, 0.08, 1.4, 0.12], line: [0.06, 0, 0.3, 0.8], marks: [0.6, 4, MARK.VEIL] },
+    [CLS.WILLOW]: { wash: [0.0, 0.06, 1.5, 0.08], line: [0.04, 0, 0.3, 0.8], marks: [0.5, 4, MARK.VEIL] },
     [CLS.BROAD]: { wash: [0.12, 0.3, 1.2, 0.4], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
     [CLS.PINE]: { wash: [0.16, 0.34, 1.1, 0.4], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 4, MARK.LEAF] },
     [CLS.MAPLE]: { wash: [0.1, 0.3, 1.2, 0.35], line: [0.06, 0, 0.3, 0.8], marks: [0.8, 5, MARK.LEAF] },
