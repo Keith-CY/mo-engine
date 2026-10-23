@@ -24,6 +24,9 @@ async function main(): Promise<void> {
   load.style.display = 'none';
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
+  // ?p2=1: the still-match painter (linan's, pass for pass); ?p2dbg=n its debug views
+  if (P.get('p2') === '1') engine.renderer.painter = 2;
+  if (P.get('p2dbg')) engine.renderer.p2.debug = Number(P.get('p2dbg'));
   // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
   if (P.get('paper') === '0' || P.get('marks') === '0' || P.get('lines') === '0') {
     const st = structuredClone(engine.renderer.style);

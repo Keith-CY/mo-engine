@@ -19,6 +19,7 @@ import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 import TERRAIN from '../shaders/terrain.wgsl';
 import SURFACES from '../shaders/surfaces.wgsl';
+import { Painter2 } from './painter2';
 
 const FRAME_FLOATS = 292;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
@@ -86,6 +87,9 @@ export class Renderer {
   debugView = 0;
   /** frames over which a change of LOD level dissolves (0: at once) */
   lodFadeFrames = 24;
+  /** which painter paints: 1 Mo's own (one pass), 2 the still-match painter (linan's, pass for pass: src/render/painter2.ts) */
+  painter: 1 | 2 = 1;
+  readonly p2: Painter2;
 
   constructor(private readonly gpu: Gpu, style: InkStyle) {
     this.device = gpu.device;
@@ -93,6 +97,7 @@ export class Renderer {
     this.frameBuf = this.device.createBuffer({ label: 'mo frame', size: FRAME_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.styleBuf = bufferFrom(this.device, packStyle(style), GPUBufferUsage.STORAGE, 'mo style');
     this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+    this.p2 = new Painter2(this.device);
     this.shadowMap = this.device.createTexture({ label: 'mo shadow map', size: [SHADOW_SIZE, SHADOW_SIZE, CASCADE_RADII.length], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
     const pass = new Uint32Array(CASCADE_RADII.length * 64);
     this.shadowPassBuf = bufferFrom(this.device, pass, GPUBufferUsage.UNIFORM, 'mo shadow passes');
@@ -168,6 +173,7 @@ export class Renderer {
       fullscreen('mo capture', PRESENT, 'rgba8unorm'),
     ]);
     this.pipes = { cull, gbuffer, shadow, ink, resolve, present, capture };
+    await this.p2.init();
   }
 
   /** the season the world is painted in: meshes out of it are not drawn */
@@ -478,18 +484,21 @@ export class Renderer {
     f.set(L.skyTint ?? [0, 0, 0, 0], 244);
     f.set(L.moonCol ?? [0, 0, 0, 0], 248);
     f.set([L.waterBase ?? 0.05, L.night ? 1 : 0, L.skyInk ?? 0, L.cloudBands ?? 0], 252);
-    f.set([...(L.waterRefl ?? [1, 0]), 0, 0], 256);
+    // (painter 2 lays the shore's reflection itself: none at present time)
+    f.set(this.painter === 2 ? [0, 0, 0, 0] : [...(L.waterRefl ?? [1, 0]), 0, 0], 256);
     f.set([...(L.shotDir ?? [0, 1]), L.waves ?? 0, L.waveMode ?? 0], 260);
     f.set(L.gains ?? [1, 1, 1, 1], 264);
     f.set([L.lineNear ?? 8, L.lineFar ?? 900, L.snow ?? 0, L.ridgeFrom ?? 900], 268);
     f.set([...(L.veil ?? [0, 0, 0]), L.rock ?? 1], 272);
     f.set(this.fieldInfo, 276);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
+    this.unjittered.set(unjittered);
     this.prevViewProj.set(unjittered);
     this.prevEye = [e[0], e[1], e[2]];
   }
 
   sun: [number, number, number] = [0.45, 0.42, -0.79];
+  private readonly unjittered = new Float32Array(16);
 
   /** the sun's light space and each cascade: a box around the eye, snapped to whole texels of the world (so walking
    *  moves the shadows' texels in whole steps and turning moves nothing) */
@@ -568,7 +577,11 @@ export class Renderer {
       p.setPipeline(pipe); p.setBindGroup(0, bg); p.draw(3); p.end();
     };
     const B = this.passBGs!;
-    pass('mo ink', t.paint.createView(), this.pipes.ink, B.ink);
+    if (this.painter === 2) {
+      const inst = this.scene?.instances ?? (this.noInstances ??= bufferFrom(d, new Uint32Array(16), GPUBufferUsage.STORAGE, 'mo instances (none)'));
+      this.p2.record(enc, { a: t.a, b: t.b, c: t.c, frame: this.frameBuf, inst }, t.paint,
+        { w: cam.width, h: cam.height, pxAngle: (2 * Math.tan((cam.fovY * Math.PI) / 360)) / cam.height, eye: [cam.position[0], cam.position[1], cam.position[2]], viewProj: this.unjittered, night: !!this.style.look.night }, tw);
+    } else pass('mo ink', t.paint.createView(), this.pipes.ink, B.ink);
     const k = this.histIndex;
     pass('mo resolve', t.hist[k].createView(), this.pipes.resolve, B.resolve[k]);
     pass('mo present', this.gpu.context.getCurrentTexture().createView(), this.pipes.present, B.present[k]);

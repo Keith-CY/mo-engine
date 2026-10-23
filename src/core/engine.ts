@@ -107,6 +107,9 @@ export class Engine {
     st.look.veil = Array.isArray(veil) && veil.length >= 3 ? [veil[0], veil[1], veil[2]] : [0, 0, 0];
     st.look.rock = num('rock') ?? 1; st.look.ridgeFrom = num('ridgeFrom') ?? 900;
     this.renderer.setStyle(st);
+    // painter 2 reads the look's ink settings as they are, measured from the look's own camera
+    this.renderer.p2.ink = ink;
+    if (vp) { this.renderer.p2.anchor = [...vp.position]; this.renderer.p2.anchorDir = st.look.shotDir ?? [0, 1]; }
   }
   private baseStyle?: InkStyle;
 
