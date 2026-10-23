@@ -45,6 +45,11 @@ export interface Slot {
   seasons: number;
   /** a far impostor's silhouette + 1 (0: an ordinary mesh) */
   billboard: number;
+  /** the looks it appears in (bit = look id; 0: every look) */
+  looks: number;
+  /** the viewpoint whose stage it is (−1: none), and the viewpoints whose stage hides it (bits) */
+  stage: number;
+  unstage: number;
 }
 
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
@@ -63,11 +68,21 @@ export class GpuScene {
   readonly visible: GPUBuffer;
   private readonly argsData: Uint32Array<ArrayBuffer>;
 
-  /** a season: the draws of the meshes out of it get no triangles (they cost nothing) */
-  setSeason(device: GPUDevice, season: string): void {
-    const bit = 1 << Math.max(0, SEASONS.indexOf(season));
+  /** a season, a look: the draws of the meshes out of them get no triangles (they cost nothing) */
+  setSeason(device: GPUDevice, season: string): void { this.season = season; this.writeTemplate(device); }
+  setLook(device: GPUDevice, look: number): void { this.look = look; this.writeTemplate(device); }
+  /** the viewpoint the eye stands at (−1: none): its stage shows, what the stage moves hides */
+  setStage(device: GPUDevice, at: number): void { this.at = at; this.writeTemplate(device); }
+  private season = 'spring';
+  private look = -1;
+  private at = -1;
+  private writeTemplate(device: GPUDevice): void {
+    const bit = 1 << Math.max(0, SEASONS.indexOf(this.season));
+    const lb = this.look >= 0 && this.look < 32 ? 1 << this.look : 0;
+    const vb = this.at >= 0 && this.at < 32 ? 1 << this.at : 0;
+    const shown = (s: Slot) => !!(s.seasons & bit) && (!s.looks || !!(s.looks & lb)) && (s.stage < 0 ? !(s.unstage & vb) : s.stage === this.at);
     const a = this.argsData;
-    for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => { a[(p * this.slots.length + i) * 5] = s.seasons & bit ? s.indexCount : 0; });
+    for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => { a[(p * this.slots.length + i) * 5] = shown(s) ? s.indexCount : 0; });
     device.queue.writeBuffer(this.argsTemplate, 0, a);
   }
   readonly slots: Slot[] = [];
@@ -130,6 +145,9 @@ export class GpuScene {
             visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones, cutoff: m.mask?.cutoff ?? 0, lift: m.lift ?? 0,
             seasons: m.seasons ? m.seasons.reduce((b, s) => b | (SEASONS.indexOf(s) >= 0 ? 1 << SEASONS.indexOf(s) : 0), 0) : 15,
             billboard: m.billboard !== undefined ? m.billboard + 1 : 0,
+            looks: m.looks ? m.looks.reduce((b, id) => b | (id >= 0 && id < 32 ? 1 << id : 0), 0) : 0,
+            stage: m.stage ?? -1,
+            unstage: m.unstage ? m.unstage.reduce((b, id) => b | (id >= 0 && id < 32 ? 1 << id : 0), 0) : 0,
           });
           visibleTotal += b.count;
           tris += (m.indices.length / 3) * b.count;
@@ -139,7 +157,10 @@ export class GpuScene {
       // the sphere the level is chosen by: the group's own, else its first mesh's
       const m0 = levels.map(levelMeshes).find((x) => x.length)?.[0];
       const bd = g?.bounds ?? (m0 !== undefined ? { center: scene.meshes[m0].center, radius: scene.meshes[m0].radius } : { center: [0, 0, 0], radius: 0 });
-      bu.set([first, levels.length | (shadowFrom << 8), b.first, b.count], bi * 16);
+      // (the coarsest level that casts a shadow: an impostor casts none)
+      let lastCast = levels.length - 1;
+      while (lastCast > 0 && levelMeshes(levels[lastCast]).some((mi) => scene.meshes[mi].billboard !== undefined)) lastCast--;
+      bu.set([first, levels.length | (shadowFrom << 8) | (lastCast << 16), b.first, b.count], bi * 16);
       // (info.z: the distance beyond which it casts no shadow; the shader does not read the first instance)
       bf[bi * 16 + 2] = g?.shadowTo ?? 1e9;
       bf.set([...levels.map((l) => l.to), ...Array(4 - levels.length).fill(1e9)], bi * 16 + 4);

@@ -24,7 +24,7 @@ export const STYLE_MO = {
 };
 /** the photograph's tone, calibrated against linan's own (?inkDebug=tone) */
 export const TONE = { SUN: 2.0, SKY: 2.3, SHOULDER: 0.3, AO: 0.35, GROUND: 0.2, PAVE: 0.25, SKY_HORIZON: 0.86, SKY_ZENITH: 0.78, WATER: 0.45, HAZE: 0.8, HAZE_DIST: 2500, HAZE_AMT: 0.85, VEIL_WILLOW: 0.45, VEIL_BLOSSOM: 0.2 };
-const INK_FLOATS = 36 * 4;
+const INK_FLOATS = 38 * 4;
 
 interface P2Targets {
   w: number; h: number;
@@ -203,6 +203,7 @@ export class Painter2 {
       ...S.paperCol, S.age,
       ...S.inkAbs, this.debug,
       ...lv.slice(0, 4), lv[4], lv[5], lv[6], lv[7], lv[8], lv[9], lv0.length >= 10 ? 1 : 0, this.benchFlags,
+      ...arr('boreFront', 8, [0, 0, 0, 0, 0, 0, 0, 0]),
     ];
     if (vals.length !== INK_FLOATS) throw new Error(`[mo p2] ${vals.length} uniform floats, not ${INK_FLOATS}`);
     f.set(vals);

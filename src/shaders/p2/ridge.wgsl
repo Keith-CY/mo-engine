@@ -59,13 +59,15 @@ fn fs(v: VOut) -> @location(0) vec4f {
     if (y <= 0.0) { dist = 999.0; break; }
     let b = at(fc.x, y);
     let cb = clsOf(b);
-    if (cb == C_SKY || depthOf(b) > D * 1.08 + 8.0) {
+    // (the bore: its own crest, wherever the wave class ends above; its face is too broken for a depth test)
+    if (select(cb == C_SKY || depthOf(b) > D * 1.08 + 8.0, cb != C_WAVE, c == C_WAVE)) {
       // refine to the pixel so ridge bands do not step
       var lo = f32(i - 1) * stepPx; var hi = f32(i) * stepPx;
       for (var k = 0; k < 4; k++) {
         let mid = 0.5 * (lo + hi);
         let m = at(fc.x, fc.y - mid);
-        if (clsOf(m) == C_SKY || depthOf(m) > D * 1.08 + 8.0) { hi = mid; } else { lo = mid; }
+        let cm = clsOf(m);
+        if (select(cm == C_SKY || depthOf(m) > D * 1.08 + 8.0, cm != C_WAVE, c == C_WAVE)) { hi = mid; } else { lo = mid; }
       }
       dist = hi / uK; break;
     }

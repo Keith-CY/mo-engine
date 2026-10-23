@@ -6,7 +6,7 @@
 // appended to the list of every slot of its level (one slot per mesh of the level; a level may have none); one
 // indirect draw per slot draws the list.
 struct Batch {
-  info: vec4u,   // first slot, levels (bits 0–7) and the finest level casting shadows (8–15), the distance beyond which
+  info: vec4u,   // first slot, levels (bits 0–7), the finest level casting shadows (8–15) and the coarsest (16–23), the distance beyond which
                  // it casts no shadow (f32 bits), instance count
   to: vec4f,     // each level is used up to this distance (m)
   bound: vec4f,  // the bounding sphere the level is chosen by, in the instance's space (centre, radius)
@@ -77,14 +77,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   // (the shadow casters take the level that stays, or the one leaving when none stays, but no finer than the group's
   // shadowFrom)
-  let shadowLevel = max(select(prev, lvl, lvl < levels), min(B.info.y >> 8u, levels - 1u));
+  let shadowLevel = max(select(prev, lvl, lvl < levels), min((B.info.y >> 8u) & 0xffu, levels - 1u));
 
   // shadow casters: in a cascade's box (light space, around the eye; the view direction plays no part)
   if ((inst[i * 16u + 15u] & 1u) != 0u && d < bitcast<f32>(B.info.z)) {
     let lp = (F.lightRot * vec4f(c, 0.0)).xyz;
     for (var k = 0u; k < CASCADES; k++) {
       let b = F.shadowBox[k];
-      if (abs(lp.x - b.x) < b.z + r && abs(lp.y - b.y) < b.z + r && abs(lp.z) < b.w + r) { emitLevel(B, shadowLevel, k + 1u, i); }
+      // (the far cascade's texels are metres across: its casters one level coarser, never the impostor)
+      let lastCast = (B.info.y >> 16u) & 0xffu;
+      let sl = select(shadowLevel, min(shadowLevel + 1u, lastCast), k == CASCADES - 1u && shadowLevel < lastCast);
+      if (abs(lp.x - b.x) < b.z + r && abs(lp.y - b.y) < b.z + r && abs(lp.z) < b.w + r) { emitLevel(B, sl, k + 1u, i); }
     }
   }
 

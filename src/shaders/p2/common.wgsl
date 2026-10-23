@@ -41,6 +41,8 @@ struct Ink2 {
   lv0: vec4f,       // the look's tone levels (baked at its viewpoint against linan's auto-levelled photograph):
   lv1: vec4f,       //   five raw tones (lv0.xyzw, lv1.x) → five tones (lv1.yzw, lv2.xy); lv2.z 1 when given
   lv2: vec4f,
+  bore0: vec4f,     // the painted bore's front: its ends (x0, z0, x1, z1; 0 none)
+  bore1: vec4f,     // its crest height over the far part, at the near end (m), a crest's length (m)
 };
 
 const C_SKY = 0u; const C_GROUND = 1u; const C_ROCK = 2u; const C_WATER = 3u; const C_ROOF = 4u; const C_WOOD = 5u;

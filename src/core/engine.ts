@@ -55,6 +55,9 @@ export class Engine {
     this.scene = data;
     this.renderer.sun = data.sun;
     this.sceneStats = this.renderer.setScene(data);
+    // (a new scene draws in the look painted now, at no viewpoint until goTo)
+    if (this.look) this.renderer.setLookId(this.look.id);
+    this.stageAt = -1;
     const W = (this.walkable = new Walkable(data));
     this.walker.ground = (x, z) => W.groundAt(x, z);
     this.walker.free = (x, z, fromG) => W.free(x, z, fromG);
@@ -74,6 +77,7 @@ export class Engine {
     this.look = L;
     this.renderer.sun = L.sun;
     this.renderer.setSeason(L.season ?? 'spring');
+    this.renderer.setLookId(L.id);
     const base = this.baseStyle ??= structuredClone(this.renderer.style);
     const st = structuredClone(base);
     const r = L.ink?.ranges;
@@ -120,6 +124,7 @@ export class Engine {
     if (Math.hypot(v.position[0] - p[0], v.position[1] - p[1], v.position[2] - p[2]) > 50) this.renderer.cut();
     this.camera.lookAt(v.position, v.target);
     this.view = v;
+    this.setStageAt(v.id);
     this.fitFov();
     this.walker.mode = this.modeAt(v.position);
   }
@@ -175,9 +180,17 @@ export class Engine {
     this.resize();
   }
 
+  /** the viewpoint the eye stands at, as linan's stills stage it (−1: none): set by goTo, left on the first step away */
+  private stageAt = -1;
+  private setStageAt(id: number): void { if (id !== this.stageAt) { this.stageAt = id; this.renderer.setStage(id); } }
+
   /** one frame: the controller moves the eye by the clock's dt, the renderer draws */
   step(capture = false): void {
     const moved = this.walker.update(this.clock.dt);
+    if (this.stageAt >= 0 && this.view) {
+      const p = this.camera.position, q = this.view.position;
+      if (Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) > 1) this.setStageAt(-1);
+    }
     if (!capture) this.adapt(moved);
     this.renderer.render(this.camera, this.clock.now / 1000, capture);
     for (const f of this.listeners) f(this);

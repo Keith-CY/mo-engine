@@ -194,6 +194,10 @@ export class Renderer {
 
   /** the season the world is painted in: meshes out of it are not drawn */
   setSeason(season: string): void { this.scene?.setSeason(this.device, season); this.shadowKeys = []; }
+  /** the look painted now: meshes staged for other looks are not drawn */
+  setLookId(id: number): void { this.scene?.setLook(this.device, id); this.shadowKeys = []; }
+  /** the viewpoint the eye stands at (−1: none): its stage is drawn, what the stage moves is not */
+  setStage(id: number): void { this.scene?.setStage(this.device, id); this.shadowKeys = []; }
 
   /** the G-buffer pipeline, with a world's surface functions (WGSL) compiled in */
   private surfacesCode = SURFACES;

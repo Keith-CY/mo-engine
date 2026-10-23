@@ -126,6 +126,12 @@ A scene may add these; a scene without them is painted from mesh and terrain cla
   silhouette — 0 dome on a short trunk, 1 pine (flat tiers), 2 willow (head and hanging curtain), 3 small round head,
   4 ovoid. It is lit as a rounded crown, casts no shadow, and is meant as a plant's last LOD level (two triangles
   where the crown had hundreds).
+* **`meshes[].looks`**: `[9]`, the looks (ids) the mesh appears in: a painting's own addition to the world (linan's
+  painted bore at 六和, drawn only in its look); absent: every look.
+* **`meshes[].stage`**, **`meshes[].unstage`**: a viewpoint's stage — what only that viewpoint's painting moves,
+  enlarges or turns (linan's three lantern-pagodas brought into the 西湖全景 view and its 雷峰 enlarged). A mesh with
+  `"stage": 1` is drawn only while the eye stands at viewpoint 1 (from going there until the first step away); one with
+  `"unstage": [1]` (the object where it really stands) is hidden then.
 * **`viewpoints[].look`**: the id of the look (`looks`) the viewpoint is painted in.
 * **`viewpoints[].fitAspect`**: `fovY` holds at this aspect and wider; a narrower screen widens it to keep the same
   horizontal field.
@@ -154,7 +160,9 @@ A scene the size of a city does not fit one file or one upload:
   "night": false, "snow": 0, "ink": { … } }]`, the times and seasons a world is painted in: the sun (towards it, unit
   length; at night the moon), and the world's own ink settings for that look (`ink`: names the world chooses; Mo's
   demo reads `ranges` = far ranges painted on the sky, in degrees: base elevation, step, ridge amplitude, count,
-  azimuth centre, half width, ink, mist fade). `sun` at the top level is the first look's.
+  azimuth centre, half width, ink, mist fade; painter 2 reads linan's ink settings as they are, `boreFront` among them:
+  a painted tidal bore's front, `[x0, z0, x1, z1, crest height far, near, crest length, 0]`, for the churned water about
+  it and the paint of its class-17 wall). `sun` at the top level is the first look's.
 
 ## Walking
 

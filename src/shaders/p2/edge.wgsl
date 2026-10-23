@@ -37,6 +37,8 @@ fn classLine(c: u32) -> array<f32, 5> {
   if (c == C_BLOOM) { r = array<f32, 5>(0.75, 0.5, 0.2, 0.4, 1.0); }
   if (c == C_PAVE) { r = array<f32, 5>(0.25, 0.0, r[2], 0.6, 1.0); }
   if (c == C_LOTUS) { r[0] = 0.16; r[3] = 0.55; r[4] = 2.0; }
+  // the bore: broken lines (the painted bore of the ink-match look: hardly any, its foam melts into the paper)
+  if (c == C_WAVE) { let m = K.look3.y > 0.5; r = array<f32, 5>(select(0.55, 0.22, m), 0.0, r[2], select(0.8, 0.5, m), 2.0); }
   return r;
 }
 
@@ -80,6 +82,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // tile rolls: only big breaks inside a roof draw (the hips, the eaves over the wall); rows are left to the wash
     if (c == C_ROOF && cb == C_ROOF) { tS = mix(0.6, 0.06, eave); }
     if (c == C_CITYFAR && cb == C_CITYFAR) { tS = 0.2; }
+    if (c == C_WAVE && cb == C_WAVE) { tS = 99.0; }   // (the bore's broken face draws no inner lines: the curls are painted)
     let sil = smoothstep(tS, tS * 2.5, lap) * step(D * 1.01, bz);
     // class boundary (the nearer side draws it); water edges belong to the land
     var cl = 0.0;

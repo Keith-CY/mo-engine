@@ -27,6 +27,12 @@ export interface MeshData {
    *  turned about the instance's up axis toward the eye, cut to a tree's silhouette: 0 dome, 1 pine, 2 willow,
    *  3 small round head, 4 ovoid */
   billboard?: number;
+  /** the looks (ids) it appears in (absent: all): a painting's own staging, shown only in its look */
+  looks?: number[];
+  /** a viewpoint's stage (its id): what only its painting moves or enlarges, shown only while the eye stands there */
+  stage?: number;
+  /** the viewpoints (ids) whose stage moves it: hidden while the eye stands at one of them */
+  unstage?: number[];
   /** per vertex 4 values for the world's surface functions (x: the surface kind, 0 none) */
   paint?: Float32Array;
   /** bounding sphere in the mesh's own space */
