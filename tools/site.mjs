@@ -23,7 +23,8 @@ fs.copyFileSync(path.join(ROOT, 'examples/demo/main.js'), path.join(OUT, 'main.j
 const first = path.basename(scenes[0]);
 const vp = opt('vp', '');
 const html = fs.readFileSync(path.join(ROOT, 'examples/demo/index.html'), 'utf8').replace('<script type="module"',
-  `<script>if (!new URLSearchParams(location.search).get('scene')) history.replaceState(null, '', '?scene=scenes/${first}/${vp ? '&vp=' + vp : ''}');</script>\n<script type="module"`);
+  `<script>{ const q = new URLSearchParams(location.search); if (!q.get('scene')) { q.set('scene', 'scenes/${first}/'); ` +
+  `if (!q.get('vp') && '${vp}') q.set('vp', '${vp}'); history.replaceState(null, '', '?' + q); } }</script>\n<script type="module"`);
 fs.writeFileSync(path.join(OUT, 'index.html'), html);
 let files = 2, bytes = 0;
 for (const dir of scenes) {

@@ -181,7 +181,7 @@
    "place": 1,
    "look": 1,
    "fov": 36,
-   "fly": false,
+   "fly": true,
    "at": [
     332,
     104,
@@ -198,7 +198,7 @@
    "place": 1,
    "look": 1,
    "fov": 36,
-   "fly": false,
+   "fly": true,
    "at": [
     332,
     104,
