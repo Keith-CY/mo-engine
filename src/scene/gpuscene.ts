@@ -90,7 +90,7 @@ export class GpuScene {
       const spans = [0, 0, 0, 0];
       levels.forEach((l, li) => {
         const ms = levelMeshes(l);
-        if (ms.length > 8) throw new Error(`[mo] LOD group ${g?.name} level ${li} has ${ms.length} meshes (8 at most)`);
+        if (ms.length > 64) throw new Error(`[mo] LOD group ${g?.name} level ${li} has ${ms.length} meshes (64 at most)`);
         spans[li] = (this.slots.length - first) | (ms.length << 16);
         for (const mi of ms) {
           const m = scene.meshes[mi];
@@ -120,7 +120,7 @@ export class GpuScene {
     const args = new Uint32Array(this.slots.length * 5 * PASSES);
     for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => args.set([s.indexCount, 0, s.firstIndex, s.baseVertex, 0], (p * this.slots.length + i) * 5));
     this.argsTemplate = bufferFrom(device, args, GPUBufferUsage.COPY_SRC, 'mo args template');
-    this.args = bufferFrom(device, args, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT, 'mo args');
+    this.args = bufferFrom(device, args, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC, 'mo args');
     this.visibleTotal = visibleTotal;
     this.visible = device.createBuffer({ label: 'mo visible', size: Math.max(16, visibleTotal * 4 * PASSES), usage: GPUBufferUsage.STORAGE });
   }
