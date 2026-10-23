@@ -616,7 +616,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // ---- the wash laid in a few layers (墨分五色): each step soft, a darker rim where a layer ends (水渍), the steps'
   // edges wandering with a world noise of ~45 px. Crowns and buildings keep most of their smooth wash
   let LAY = F.layering.x;
-  if (LAY > 0.0 && cls != C_WATER) {
+  if (LAY > 0.0 && cls != C_WATER && cls != 24u) {
     let wn = zoomNoise(P, footprint, 45.0, vec3f(5.1, 2.2, 9.7));
     let q = ink * LAY + (wn - 0.5) * 0.6;
     let fl = floor(q);
@@ -626,7 +626,23 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let k = select(select(0.5, 0.2, crown), 0.25, isArch(cls));
     ink = max(mix(ink, layered, k), 0.0) + rim * F.layering.y / LAY * select(select(1.0, 0.3, cls == C_ROCK), 0.0, crown);
   }
-  ink += leaf * 0.95 + rockLine * 0.7;
+  ink += leaf * 0.95 + rockLine * 0.7 + vein;
+
+  // ---- 墨荷: every lotus leaf one wash of its own depth, a little deeper where it turns from the light; veins (勾筋)
+  // radiating from the leaf's centre (its instance's origin), near leaves only
+  var vein = 0.0;
+  if (cls == 24u) {
+    let ii = Cv.y;
+    let O = vec3f(bitcast<f32>(inst[ii * 16u + 9u]), bitcast<f32>(inst[ii * 16u + 10u]), bitcast<f32>(inst[ii * 16u + 11u]));
+    let hd = hash3(vec3i(i32(Cv.x & 0xffffu), 77, 1));
+    ink = (s0.x + s0.y * shade + s0.w * smoothstep(0.4, 0.95, 1.0 - abs(nW.y))) * (0.7 + 0.6 * hd);
+    let v = P.xz - O.xz;
+    let r = length(v);
+    let a = atan2(v.y, v.x) + hd * 6.28;
+    let dA = abs(fract(a / 6.2831 * 13.0 + 0.5) - 0.5) / 13.0 * 6.2831;
+    vein = (1.0 - smoothstep(footprint * 0.3, footprint * 1.1, r * sin(dA))) * smoothstep(footprint * 4.0, footprint * 10.0, r)
+         * (1.0 - smoothstep(F.lines.x * 0.8, F.lines.x * 2.5, dist)) * 0.55 * smoothstep(0.3, 0.55, zoomNoise(P + vec3f(4.4), footprint, 25.0, vec3f(0.0))) * s2.x;
+  }
 
   // ---- marks on other surfaces: world-anchored, a constant size on the screen, a different pattern per object
   var mark = 0.0;

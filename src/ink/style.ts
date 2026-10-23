@@ -110,6 +110,9 @@ export const DEFAULT_STYLE: InkStyle = {
     [CLS.SMALL]: { wash: [0.1, 0.12, 1.4, 0.25], line: [0.35, 0, 0.3, 0.8], marks: [0.5, 5, MARK.GRASS] },
     [CLS.PAVE]: { wash: [0.05, 0.05, 1.5, 0.08], line: [0.25, 0, 0.3, 1.0], marks: [0, 8, MARK.NONE] },
     [CLS.ROCK]: { wash: [0.1, 0.55, 1.2, 0.3], line: [0.55, 0.15, 0.75, 1.6], marks: [0.8, 6, MARK.ROCK], haze: 2.2 },
+    // the carving in the cliff: a clean, fine drawn line (白描) on its silhouette and every fold; the niche's rim like rock
+    [CLS.FIGURE]: { wash: [0.02, 0.1, 1.5, 0.1], line: [0.9, 0.6, 0.12, 0.6], marks: [0, 6, MARK.NONE] },
+    [CLS.NICHE]: { wash: [0.25, 0.3, 1.2, 0.2], line: [0.8, 0.3, 0.5, 1.1], marks: [0, 6, MARK.NONE], haze: 2.2 },
     [CLS.WATER]: { wash: [0.0, 0.05, 2.0, 0.1], line: [0, 0, 0.3, 1.0], marks: [0.0, 14, MARK.NONE] },
     // architecture: pale washes, the contours and joints drawn (界画)
     [CLS.ROOF]: { ...ARCH, wash: [0.45, 0.35, 1.2, 0.2], line: [0.8, 0.35, 0.6, 1.0], marks: [0.25, 4, MARK.GRAIN] },
@@ -130,7 +133,8 @@ export const DEFAULT_STYLE: InkStyle = {
     // peach blossom: a breath of wash (wash.x + wash.y × shade) under pale pink dots
     [CLS.BLOSSOM]: { wash: [0.09, 0.1, 1, 0], line: [0.05, 0, 0.3, 0.8], marks: [1.0, 5, MARK.BLOSSOM], tint: [0.84, 0.46, 0.5, 0.62] },
     [CLS.BLOOM]: { wash: [0.02, 0.06, 1.5, 0.1], line: [0.75, 0.5, 0.2, 0.8], tint: [0.9, 0.55, 0.6, 0.4] },
-    [CLS.LOTUS]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.16, 0, 0.3, 1.0], marks: [0.6, 6, MARK.LEAF] },
+    // 墨荷: each lotus leaf one flat wet wash of its own depth (src/shaders/ink.wgsl), veins drawn near
+    [CLS.LOTUS]: { wash: [0.5, 0.3, 1, 0.15], line: [0.16, 0, 0.3, 1.0], marks: [0.55, 6, MARK.NONE] },
     [CLS.IVY]: { wash: [0.1, 0.3, 1.2, 0.3], line: [0.3, 0, 0.3, 0.8], marks: [0.6, 4, MARK.LEAF] },
   },
 };
