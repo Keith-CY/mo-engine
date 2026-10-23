@@ -24,10 +24,15 @@ export interface MeshData {
 }
 
 export interface LodLevel {
-  mesh: number;
+  /** the level's mesh, or its meshes (all drawn; none: nothing over this range) */
+  mesh?: number;
+  meshes?: number[];
   /** used up to this distance from the eye (m) */
   to: number;
 }
+
+/** the meshes of a LOD level */
+export function levelMeshes(l: LodLevel): number[] { return l.meshes ?? (l.mesh !== undefined ? [l.mesh] : []); }
 
 export interface LodGroup {
   name: string;
@@ -35,6 +40,9 @@ export interface LodGroup {
   /** the finest level that casts the sun's shadow (default 0): an instance drawn finer casts through this level (a
    *  tree's crown bodies, where its finest level is thin alpha-tested strands) */
   shadowFrom?: number;
+  /** the sphere its level is chosen by, in the instance's space (default: its first mesh's), so every part of a
+   *  building changes level together */
+  bounds?: { center: [number, number, number]; radius: number };
 }
 
 export type Batch = { mesh: number; first: number; count: number } | { lodGroup: number; first: number; count: number };
@@ -67,6 +75,22 @@ export interface Viewpoint {
   fovY: number;
   /** fovY holds at this aspect and wider; a narrower screen widens it to keep the same horizontal field */
   fitAspect?: number;
+  /** the look (SceneData.looks) it is painted in */
+  look?: number;
+}
+
+/** a time and season a world is painted in */
+export interface LookData {
+  id: number;
+  name: string;
+  en?: string;
+  /** towards the sun (at night the moon), unit length */
+  sun: [number, number, number];
+  season?: 'spring' | 'summer' | 'autumn' | 'winter';
+  night?: boolean;
+  snow?: number;
+  /** the world's own ink settings for the look (Mo's demo reads `ranges`, degrees) */
+  ink?: { ranges?: number[]; [k: string]: unknown };
 }
 
 export interface SceneData {
@@ -88,6 +112,7 @@ export interface SceneData {
   /** towards the sun, unit length */
   sun: [number, number, number];
   viewpoints: Viewpoint[];
+  looks?: LookData[];
 }
 
 export const INSTANCE_BYTES = 64;

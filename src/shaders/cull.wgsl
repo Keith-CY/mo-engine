@@ -3,11 +3,13 @@
 // The level comes from the straight-line distance between the eye and the instance's bounds, with hysteresis: the
 // last level is kept until the distance leaves its band by `lod.y`. It is chosen before the frustum test and kept for
 // instances out of view, so turning the head never changes a level (only walking does). A visible instance is
-// appended to the list of its (mesh, level) slot; one indirect draw per slot draws the list.
+// appended to the list of every slot of its level (one slot per mesh of the level; a level may have none); one
+// indirect draw per slot draws the list.
 struct Batch {
   info: vec4u,   // first slot, levels (bits 0–7) and the finest level casting shadows (8–15), first instance, count
   to: vec4f,     // each level is used up to this distance (m)
-  bound: vec4f,  // the level-0 mesh's bounding sphere in its own space (centre, radius)
+  bound: vec4f,  // the bounding sphere the level is chosen by, in the instance's space (centre, radius)
+  spans: vec4u,  // per level: its first slot (from info.x, bits 0–15) and its number of slots (16–31)
 };
 
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -24,6 +26,19 @@ const NONE = 0xffu;
 fn col(i: u32, c: u32) -> vec3f {
   let b = i * 16u + c * 3u;
   return vec3f(bitcast<f32>(inst[b]), bitcast<f32>(inst[b + 1u]), bitcast<f32>(inst[b + 2u]));
+}
+
+/** appends instance i to the list of every slot of a level, in pass pi (0 the view, 1 + k cascade k) */
+fn emitLevel(B: Batch, level: u32, pi: u32, i: u32) {
+  let slots = u32(F.counts.x);
+  let passLen = u32(F.counts.y);
+  let sp = B.spans[min(level, 3u)];
+  let s0 = B.info.x + (sp & 0xffffu);
+  for (var m = 0u; m < (sp >> 16u); m++) {
+    let s = s0 + m;
+    let n = atomicAdd(&args[(pi * slots + s) * 5u + 1u], 1u);
+    visible[pi * passLen + slotBase[s] + n] = i;
+  }
 }
 
 @compute @workgroup_size(64)
@@ -60,21 +75,14 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   // (the shadow casters take the level that stays, or the one leaving when none stays, but no finer than the group's
   // shadowFrom)
-  let slot = B.info.x + select(prev, lvl, lvl < levels);
-  let shadowSlot = B.info.x + max(select(prev, lvl, lvl < levels), min(B.info.y >> 8u, levels - 1u));
-  let slots = u32(F.counts.x);
-  let passLen = u32(F.counts.y);
+  let shadowLevel = max(select(prev, lvl, lvl < levels), min(B.info.y >> 8u, levels - 1u));
 
   // shadow casters: in a cascade's box (light space, around the eye; the view direction plays no part)
   if ((inst[i * 16u + 15u] & 1u) != 0u) {
     let lp = (F.lightRot * vec4f(c, 0.0)).xyz;
     for (var k = 0u; k < CASCADES; k++) {
       let b = F.shadowBox[k];
-      if (abs(lp.x - b.x) < b.z + r && abs(lp.y - b.y) < b.z + r && abs(lp.z) < b.w + r) {
-        let s = (k + 1u) * slots + shadowSlot;
-        let n = atomicAdd(&args[s * 5u + 1u], 1u);
-        visible[(k + 1u) * passLen + slotBase[shadowSlot] + n] = i;
-      }
+      if (abs(lp.x - b.x) < b.z + r && abs(lp.y - b.y) < b.z + r && abs(lp.z) < b.w + r) { emitLevel(B, shadowLevel, k + 1u, i); }
     }
   }
 
@@ -82,13 +90,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let p = F.planes[k];
     if (dot(p.xyz, c) + p.w < -r) { return; }
   }
-  if (lvl < levels) {
-    let n = atomicAdd(&args[slot * 5u + 1u], 1u);
-    visible[slotBase[slot] + n] = i;
-  }
-  if (fading) {
-    let ps = B.info.x + prev;
-    let n = atomicAdd(&args[ps * 5u + 1u], 1u);
-    visible[slotBase[ps] + n] = i;
-  }
+  if (lvl < levels) { emitLevel(B, lvl, 0u, i); }
+  if (fading) { emitLevel(B, prev, 0u, i); }
 }

@@ -8,7 +8,7 @@ import { initGpu, type Gpu } from '../gpu/device';
 import { Renderer, type FrameStats } from '../render/renderer';
 import { DEFAULT_STYLE, type InkStyle } from '../ink/style';
 import { Walker } from '../controls/walker';
-import type { SceneData, Viewpoint } from '../scene/types';
+import type { LookData, SceneData, Viewpoint } from '../scene/types';
 import { addTerrain, groundAt } from '../terrain/chunks';
 
 export interface EngineOptions {
@@ -59,7 +59,26 @@ export class Engine {
     return this.sceneStats;
   }
 
+  /** the look painted now (null: the scene's sun and the base style) */
+  look: LookData | null = null;
+
+  /** paints the world in one of its looks: its sun (or moon), its far ranges, petals only in spring */
+  setLook(id: number): void {
+    const L = this.scene?.looks?.find((l) => l.id === id);
+    if (!L || !this.scene) return;
+    this.look = L;
+    this.renderer.sun = L.sun;
+    const base = this.baseStyle ??= structuredClone(this.renderer.style);
+    const st = structuredClone(base);
+    const r = L.ink?.ranges;
+    if (Array.isArray(r) && r.length >= 8) st.look.ranges = r.slice(0, 8) as NonNullable<typeof st.look.ranges>;
+    if ((L.season ?? 'spring') !== 'spring' && st.look.petals) st.look.petals = [0, st.look.petals[1], st.look.petals[2], st.look.petals[3]];
+    this.renderer.setStyle(st);
+  }
+  private baseStyle?: InkStyle;
+
   goTo(v: Viewpoint): void {
+    if (v.look !== undefined && v.look !== this.look?.id) this.setLook(v.look);
     this.camera.lookAt(v.position, v.target);
     this.view = v;
     this.fitFov();

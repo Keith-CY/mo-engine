@@ -17,6 +17,8 @@ async function main(): Promise<void> {
   const scene = P.get('scene') ? await loadMoScene(P.get('scene')!) : syntheticTown(Number(P.get('seed')) || 1103, { heightfield: P.get('terrain') === '1' });
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
+  // ?look=id: paint in that look (a viewpoint brings its own)
+  if (P.get('look')) engine.setLook(Number(P.get('look')));
   // diagnostics: ?paper=0 ?marks=0 ?lines=0 turn the painter's terms off
   if (P.get('paper') === '0' || P.get('marks') === '0' || P.get('lines') === '0') {
     const st = structuredClone(engine.renderer.style);
@@ -36,8 +38,13 @@ async function main(): Promise<void> {
     engine.goTo({ id: 0, name: 'at', position: at, target: to, fovY: Number(P.get('fov')) || 50 });
   }
   addEventListener('keydown', (e) => {
-    const n = /^Digit([1-9])$/.exec(e.code);
-    if (n) { const v = scene.viewpoints[Number(n[1]) - 1]; if (v) engine.goTo(v); }
+    // 1 … 9, 0: the viewpoints (0 the tenth); L: the next look
+    const n = /^Digit([0-9])$/.exec(e.code);
+    if (n) { const v = scene.viewpoints[(Number(n[1]) + 9) % 10]; if (v) engine.goTo(v); }
+    if (e.code === 'KeyL' && scene.looks?.length) {
+      const i = scene.looks.findIndex((l) => l.id === engine.look?.id);
+      engine.setLook(scene.looks[(i + 1) % scene.looks.length].id);
+    }
     if (e.code === 'KeyH') hud.hidden = !hud.hidden;
   });
   let last = 0;
@@ -48,7 +55,7 @@ async function main(): Promise<void> {
     const ft = e.frameTimes.slice(-120);
     const mean = ft.reduce((a, b) => a + b, 0) / Math.max(1, ft.length);
     const p = e.camera.position;
-    hud.textContent = `${scene.name} · ${stats.instances} instances · ${(stats.triangles / 1e6).toFixed(1)} M tris (all at level 0+)\n` +
+    hud.textContent = `${scene.name}${engine.look ? ' · ' + engine.look.name : ''} · ${stats.instances} instances · ${(stats.triangles / 1e6).toFixed(1)} M tris (all at level 0+)\n` +
       `${(1000 / mean).toFixed(0)} fps · ${e.walker.mode} · ${p.map((x) => x.toFixed(0)).join(' ')}\n` +
       `GPU ms ${Object.entries(e.renderer.gpuTimes).map(([k, v]) => `${k} ${v}`).join(' · ')}`;
   });
