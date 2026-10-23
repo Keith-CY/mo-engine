@@ -75,6 +75,9 @@ export interface Look {
   snow?: number;
   /** the woods paling upward into haze: from y0 to y1 (m), amount */
   veil?: [number, number, number];
+  /** rock painted as planes, fissures and streaks (gain; 0: as the land), near within ridgeFrom m */
+  rock?: number;
+  ridgeFrom?: number;
   /** a night painting: the sky's ink */
   night?: boolean;
   skyInk?: number;

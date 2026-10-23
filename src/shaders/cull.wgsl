@@ -6,7 +6,8 @@
 // appended to the list of every slot of its level (one slot per mesh of the level; a level may have none); one
 // indirect draw per slot draws the list.
 struct Batch {
-  info: vec4u,   // first slot, levels (bits 0–7) and the finest level casting shadows (8–15), first instance, count
+  info: vec4u,   // first slot, levels (bits 0–7) and the finest level casting shadows (8–15), the distance beyond which
+                 // it casts no shadow (f32 bits), instance count
   to: vec4f,     // each level is used up to this distance (m)
   bound: vec4f,  // the bounding sphere the level is chosen by, in the instance's space (centre, radius)
   spans: vec4u,  // per level: its first slot (from info.x, bits 0–15) and its number of slots (16–31)
@@ -78,7 +79,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let shadowLevel = max(select(prev, lvl, lvl < levels), min(B.info.y >> 8u, levels - 1u));
 
   // shadow casters: in a cascade's box (light space, around the eye; the view direction plays no part)
-  if ((inst[i * 16u + 15u] & 1u) != 0u) {
+  if ((inst[i * 16u + 15u] & 1u) != 0u && d < bitcast<f32>(B.info.z)) {
     let lp = (F.lightRot * vec4f(c, 0.0)).xyz;
     for (var k = 0u; k < CASCADES; k++) {
       let b = F.shadowBox[k];

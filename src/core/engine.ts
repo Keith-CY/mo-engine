@@ -91,7 +91,8 @@ export class Engine {
     st.look.accent = num('accent') ?? 0; st.look.warm = num('warm') ?? 0; st.look.glow = num('glow') ?? 0;
     st.look.clouds = num('clouds') ?? 0; st.look.cloudBands = num('cloudBands') ?? 0;
     st.look.skyTint = v4('skyTint'); st.look.moonCol = v4('moonCol');
-    st.look.waterBase = num('waterBase') ?? num('water') ?? 0.05;
+    // (the water is blank paper unless the look gives it a wash; at night its own dark water)
+    st.look.waterBase = num('waterBase') ?? (L.night || num('night') ? num('water') ?? 0.6 : 0);
     st.look.waterRefl = Array.isArray(ink.waterRefl) ? [(ink.waterRefl as number[])[0], (ink.waterRefl as number[])[1]] : [1, 0];
     st.look.night = !!(L.night || num('night')); st.look.skyInk = num('sky') ?? 0;
     if (vp) { const dx = vp.target[0] - vp.position[0], dz = vp.target[2] - vp.position[2], l = Math.hypot(dx, dz) || 1; st.look.shotDir = [dx / l, dz / l]; }
@@ -103,6 +104,7 @@ export class Engine {
     st.look.snow = L.snow ?? num('paperLift') ?? 0;
     const veil = ink.veil as number[] | undefined;
     st.look.veil = Array.isArray(veil) && veil.length >= 3 ? [veil[0], veil[1], veil[2]] : [0, 0, 0];
+    st.look.rock = num('rock') ?? 1; st.look.ridgeFrom = num('ridgeFrom') ?? 900;
     this.renderer.setStyle(st);
   }
   private baseStyle?: InkStyle;

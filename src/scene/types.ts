@@ -18,6 +18,9 @@ export interface MeshData {
   mask?: { texture: number; cutoff: number; all: boolean };
   tone: number;
   indices: Uint32Array;
+  /** lifted toward the sky by this many metres per metre of eye distance (ground covers the coarse far terrain would
+   *  swallow) */
+  lift?: number;
   /** bounding sphere in the mesh's own space */
   center: [number, number, number];
   radius: number;
@@ -43,6 +46,8 @@ export interface LodGroup {
   /** the sphere its level is chosen by, in the instance's space (default: its first mesh's), so every part of a
    *  building changes level together */
   bounds?: { center: [number, number, number]; radius: number };
+  /** beyond this distance from the eye it casts no shadow */
+  shadowTo?: number;
 }
 
 export type Batch = { mesh: number; first: number; count: number } | { lodGroup: number; first: number; count: number };
@@ -82,6 +87,8 @@ export interface Viewpoint {
 /** where a walker may stand beyond the terrain (docs/SCENE_FORMAT.md, Walking) */
 export interface WalkData {
   waterBelow?: number;
+  /** the distance (m) a walker keeps from every blocker */
+  clearance?: number;
   decks?: { origin: [number, number]; dir: [number, number]; halfWidth: number; halfLength: number; rail?: number; profile: { from: number; step: number; y: number[] } }[];
   blockers?: ({ circle: [number, number, number] } | { rect: [number, number, number, number, number] })[];
 }

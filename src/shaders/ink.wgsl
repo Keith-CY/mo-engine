@@ -275,6 +275,97 @@ fn farWoods(P: vec3f, nW: vec3f, fp: f32, dens: f32) -> f32 {
   return mix(a, b, t);
 }
 
+// ---- rock (after linan's ink-match rock): planes, fissures and dry streaks on the face's own vertical plane — the one
+// across the larger horizontal component of its normal (fixed to the rock, so a turn moves them rigidly)
+fn rockPlane(P: vec3f, nW: vec3f) -> vec3f {
+  let ax = abs(nW.x) > abs(nW.z);
+  let q = select(vec2f(P.x, P.y), vec2f(P.z, P.y), ax);
+  let side = select(sign(nW.z + 1e-6), sign(nW.x + 1e-6), ax);
+  return vec3f(q, side);
+}
+/** 斧劈 facets: a Voronoi partition of the face plane (cells taller than wide, sheared down the slope) → (the cell's
+ *  value, metres to its border) */
+fn facetCell(q0: vec2f, S: f32, shear: f32, seed: i32) -> vec2f {
+  var q = q0;
+  q.x += shear * q.y;
+  let g = q / vec2f(S, S * 1.6);
+  let gi = floor(g);
+  let gf = g - gi;
+  var d1 = 9.0; var d2 = 9.0; var id = gi;
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let o = vec2f(f32(i), f32(j));
+      let h = h4(vec3i(vec2i(gi + o), seed));
+      let d = length((o + 0.1 + 0.8 * h.xy - gf) * vec2f(1.0, 1.6));
+      if (d < d1) { d2 = d1; d1 = d; id = gi + o; } else if (d < d2) { d2 = d; }
+    }
+  }
+  return vec2f(hash3(vec3i(vec2i(id), seed + 5)), (d2 - d1) * 0.5 * S);
+}
+/** two facet sizes (big planes ~bigPx on the screen, small ~bigPx / 3), blended by distance → (plane value −0.5 … 0.5,
+ *  border line: only some plane edges are drawn, a cut, a fold; the rest are left to the change of tone) */
+fn facets(P: vec3f, nW: vec3f, fp: f32, bigPx: f32) -> vec2f {
+  let rp = rockPlane(P, nW);
+  let q = rp.xy;
+  let l = log2(fp * bigPx);
+  let l0 = floor(l);
+  let t = smoothstep(0.0, 1.0, l - l0);
+  var r = vec2f(0.0);
+  for (var L = 0; L < 2; L++) {
+    let lev = l0 + f32(L);
+    let S = exp2(lev);
+    let a = facetCell(q, S, 0.35 * rp.z, 401 + i32(lev) * 3);
+    let b = facetCell(q + 7.3, S * 0.36, -0.25 * rp.z, 433 + i32(lev) * 3);
+    let line = (1.0 - smoothstep(fp * 0.4, fp * 1.3, a.y)) * step(0.62, a.x) * smoothstep(0.35, 0.6, vnoise2(q / (S * 0.7) + 3.0));
+    r += vec2f((a.x - 0.5) * 0.65 + (b.x - 0.5) * 0.35, line) * select(t, 1.0 - t, L == 0);
+  }
+  return r;
+}
+/** the vertical fissures of a limestone face: long wandering cracks down the face plane, a column of rock between two
+ *  of them, ~38 px columns → (the crack's ink, the shade of the step beside it) */
+fn fissures(P: vec3f, nW: vec3f, fp: f32) -> vec2f {
+  let q = rockPlane(P, nW).xy;
+  let px = max(fp, 1e-4);
+  let l = log2(px * 38.0);
+  let l0 = floor(l);
+  let t = smoothstep(0.0, 1.0, l - l0);
+  var r = vec2f(0.0);
+  for (var L = 0; L < 2; L++) {
+    let lev = l0 + f32(L);
+    let S = exp2(lev);
+    let ci = floor(q.x / S);
+    var on = 0.0; var side = 0.0;
+    for (var i = -1; i <= 1; i++) {
+      let c = ci + f32(i);
+      let h = h4(vec3i(i32(c), i32(lev) + 64, 913));
+      let x = (c + 0.2 + 0.6 * h.x) * S + S * 0.3 * (vnoise2(vec2f(c * 7.1, q.y / (S * 1.7))) - 0.5) + S * 0.07 * (vnoise2(vec2f(c * 3.3, q.y / (S * 0.35))) - 0.5);
+      var seg = smoothstep(0.3, 0.5, vnoise2(vec2f(c * 5.7 + 2.0, q.y / (S * 3.0) + h.y * 9.0))) * step(0.3, h.z);
+      let d = (q.x - x) / px;
+      let w = (0.25 + 0.9 * h.y * h.y) * seg;
+      on = max(on, (1.0 - smoothstep(w - 0.3, w + 0.8, abs(d))) * seg * (0.55 + 0.45 * h.z));
+      side = max(side, step(0.0, d) * exp(-d / (5.0 + 16.0 * h.w)) * seg);
+    }
+    r += vec2f(on, side) * select(t, 1.0 - t, L == 0);
+  }
+  return r;
+}
+/** dry vertical streaks of the side brush on a face, gathered in groups (~26 px), denser in shade */
+fn rockStreaks(P: vec3f, nW: vec3f, fp: f32, dens: f32) -> f32 {
+  let q = rockPlane(P, nW).xy;
+  let l = log2(fp * 26.0);
+  let l0 = floor(l);
+  var c = vec2f(0.0);
+  for (var L = 0; L < 2; L++) {
+    let S = exp2(l0 + f32(L));
+    let u = vec2f(q.y / S, q.x / (S / 5.5));
+    let n = vnoise2(u + (l0 + f32(L)) * 17.0) * 0.62 + vnoise2(u * vec2f(2.1, 1.7) + 5.3) * 0.38;
+    let cl = vnoise2(q / (S * 2.6) + (l0 + f32(L)) * 3.1);
+    let th = 1.0 - dens * (0.45 + 0.8 * cl);
+    c[L] = smoothstep(th, th + 0.06, n) * (0.7 + 0.3 * smoothstep(0.2, 0.7, vnoise2(u * vec2f(0.5, 1.5) + 9.0)));
+  }
+  return mix(c.x, c.y, smoothstep(0.0, 1.0, l - l0));
+}
+
 /** silhouette and fold strength between this pixel and its neighbour n (offset o); the sky lies behind everything */
 fn edgeTo(A: vec4f, nC: vec3f, cls: u32, p: vec2i, o: vec2i, s1: vec4f) -> f32 {
   let An = loadA(p + o);
@@ -447,6 +538,31 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // a roof's wash: the look's roof gain
   if (cls == C_ROOF) { ink *= F.gains.y; }
 
+  // ---- rock: graded grey washes laid in mottled patches, deeper in shade, cut by vertical fissures with the shade of
+  // the stepped plane beside each, a value per 斧劈 plane; near rock only (far it is the land's wash)
+  var rockLine = 0.0;
+  if ((cls == C_ROCK || cls == 25u) && F.veil.w > 0.0) {
+    let nearR = 1.0 - smoothstep(F.lines.w * 0.3, F.lines.w * 0.8, dist);
+    if (nearR > 0.0) {
+      let fc2 = facets(P, nW, footprint, 150.0);
+      let fis = fissures(P, nW, footprint);
+      let mot = zoomNoise(P * vec3f(1.0, 0.45, 1.0) + vec3f(17.0), footprint, 70.0, vec3f(0.0));
+      let mot2 = zoomNoise(P * vec3f(1.0, 0.3, 1.0) + vec3f(3.0), footprint, 22.0, vec3f(0.0));
+      let pv = smoothstep(0.15, 0.85, smoothstep(0.05, 0.65, Bv.x));
+      var rw = 0.17 + 0.24 * (1.0 - pv) + 0.2 * (mot - 0.5) + 0.08 * (mot2 - 0.5) + 0.07 + 0.3 * fis.y + 0.1 * fc2.x;
+      if (cls == 25u) { rw = 0.3 + 0.12 * (1.0 - pv) + 0.1 * (mot - 0.5); }
+      ink = mix(ink, rw, nearR);
+      rockLine = max(max(fc2.y * 0.3, fis.x), rockStreaks(P, nW, footprint, 0.35 + 0.35 * shade) * 0.32)
+               * nearR * (0.6 + 0.4 * shade) * select(1.0, 0.35, cls == 25u) * F.veil.w;
+    }
+  }
+  // the carving (a figure in the rock): pale stone modelled where its form turns away from the eye (the angle the eye
+  // sees it at, not the view's own axes)
+  if (cls == 12u) {
+    let rimV = pow(1.0 - clamp(abs(dot(nW, dirW)), 0.0, 1.0), 1.5);
+    ink = 0.015 + 0.2 * rimV + 0.06 * (1.0 - smoothstep(0.1, 0.9, Bv.x));
+  }
+
   // ---- the wash laid in a few layers (墨分五色): each step soft, a darker rim where a layer ends (水渍), the steps'
   // edges wandering with a world noise of ~45 px. Crowns and buildings keep most of their smooth wash
   let LAY = F.layering.x;
@@ -460,7 +576,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let k = select(select(0.5, 0.2, crown), 0.25, isArch(cls));
     ink = max(mix(ink, layered, k), 0.0) + rim * F.layering.y / LAY * select(select(1.0, 0.3, cls == C_ROCK), 0.0, crown);
   }
-  ink += leaf * 0.95;
+  ink += leaf * 0.95 + rockLine * 0.7;
 
   // ---- marks on other surfaces: world-anchored, a constant size on the screen, a different pattern per object
   var mark = 0.0;

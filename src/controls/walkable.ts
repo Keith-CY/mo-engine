@@ -18,10 +18,12 @@ export class Walkable {
   private readonly blockers: Blocker[] = [];
   private readonly grid = new Map<number, { decks: number[]; blockers: number[] }>();
   private readonly waterBelow: number;
+  private readonly clearance: number;
 
   constructor(private readonly scene: SceneData) {
     const w: WalkData = scene.walk ?? {};
     this.waterBelow = w.waterBelow ?? -Infinity;
+    this.clearance = w.clearance ?? 0.35;
     for (const d of w.decks ?? []) {
       const l = Math.hypot(d.dir[0], d.dir[1]) || 1;
       const dk: Deck = { ox: d.origin[0], oz: d.origin[1], dx: d.dir[0] / l, dz: d.dir[1] / l, hw: d.halfWidth, hl: d.halfLength, rail: d.rail ?? 0.45, from: d.profile.from, step: d.profile.step, y: d.profile.y };
@@ -78,11 +80,12 @@ export class Walkable {
     if (d === -Infinity) {
       for (const k of this.cell(x, z)?.blockers ?? []) {
         const b = this.blockers[k];
-        if ('c' in b) { if (Math.hypot(x - b.c[0], z - b.c[1]) < b.c[2] + 0.35) return false; }
+        if ('c' in b) { if (Math.hypot(x - b.c[0], z - b.c[1]) < b.c[2] + this.clearance) return false; }
         else {
           const [cx, cz, hw, hd, rot] = b.r, s = Math.sin(rot), c = Math.cos(rot);
           const lx = (x - cx) * c - (z - cz) * s, lz = (x - cx) * s + (z - cz) * c;
-          if (Math.abs(lx) < hw + 0.35 && Math.abs(lz) < hd + 0.35) return false;
+          const qx = Math.max(Math.abs(lx) - hw, 0), qz = Math.max(Math.abs(lz) - hd, 0);
+          if (Math.hypot(qx, qz) < this.clearance) return false;
         }
       }
     }

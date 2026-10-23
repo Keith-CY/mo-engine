@@ -10,6 +10,7 @@ struct Draw {
   hasTone: u32,
   level: u32,     // the LOD level this draw holds
   cutoff: f32,    // alpha cutoff of its alpha-tested triangles
+  lift: f32,      // metres of lift per metre of eye distance (ground covers over the coarse far terrain)
 };
 
 @group(0) @binding(0) var<uniform> F: Frame;
@@ -100,6 +101,7 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
   o.nW = X * n.x + Y * n.y + Z * n.z;
   // terrain: the grid lifted onto its field (src/shaders/terrain.wgsl)
   if ((vcls & VC_TERRAIN) != 0u) { let L = liftTerrain(rel, vcls, uv.x, length(X)); rel = L.rel; o.nW = L.nW; }
+  rel.y += D.lift * length(rel);
   o.pos = F.viewProj * vec4f(rel, 1.0);
   o.rel = rel;
   o.depth = -(F.viewRot * vec4f(rel, 1.0)).z;

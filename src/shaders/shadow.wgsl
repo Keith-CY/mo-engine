@@ -1,7 +1,7 @@
 // The sun's shadow map: casters chosen by the culling pass for each cascade, depth only; alpha-tested cards are cut by
 // their mask (the frame's light matrices; this pass's cascade comes as a uniform).
 struct Pass { cascade: u32, visOffset: u32, pad0: u32, pad1: u32 };
-struct Draw { visibleBase: u32, cls: u32, tone: f32, hasTone: u32, level: u32, cutoff: f32 };
+struct Draw { visibleBase: u32, cls: u32, tone: f32, hasTone: u32, level: u32, cutoff: f32, lift: f32 };
 
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> S: Pass;
@@ -29,6 +29,7 @@ fn vs(@location(0) p: vec3f, @location(1) uv: vec2f, @location(2) vcls: u32, @bu
   let i = visible[S.visOffset + D.visibleBase + ii];
   var rel = col(i, 0u) * p.x + col(i, 1u) * p.y + col(i, 2u) * p.z + (col(i, 3u) - F.eye.xyz);
   if ((vcls & VC_TERRAIN) != 0u) { rel = liftTerrain(rel, vcls, uv.x, length(col(i, 0u))).rel; }
+  rel.y += D.lift * length(rel);
   var o: VOut;
   o.pos = F.shadowVP[S.cascade] * vec4f(rel, 1.0);
   o.uv = uv;

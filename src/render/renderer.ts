@@ -369,7 +369,7 @@ export class Renderer {
     const du = new Uint32Array(draws), df = new Float32Array(draws);
     s.slots.forEach((sl, i) => {
       const o = (i * DRAW_STRIDE) / 4;
-      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff;
+      du[o] = sl.visibleBase; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff; df[o + 6] = sl.lift;
     });
     this.drawBuf = bufferFrom(d, new Uint8Array(draws), GPUBufferUsage.UNIFORM, 'mo draws');
     this.drawBG = d.createBindGroup({ layout: this.layouts.draw, entries: [{ binding: 0, resource: { buffer: this.drawBuf, size: 32 } }] });
@@ -464,8 +464,8 @@ export class Renderer {
     f.set([...(L.waterRefl ?? [1, 0]), 0, 0], 256);
     f.set([...(L.shotDir ?? [0, 1]), L.waves ?? 0, L.waveMode ?? 0], 260);
     f.set(L.gains ?? [1, 1, 1, 1], 264);
-    f.set([L.lineNear ?? 8, L.lineFar ?? 900, L.snow ?? 0, 0], 268);
-    f.set([...(L.veil ?? [0, 0, 0]), 0], 272);
+    f.set([L.lineNear ?? 8, L.lineFar ?? 900, L.snow ?? 0, L.ridgeFrom ?? 900], 268);
+    f.set([...(L.veil ?? [0, 0, 0]), L.rock ?? 1], 272);
     f.set(this.fieldInfo, 276);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.prevViewProj.set(unjittered);

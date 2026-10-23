@@ -28,6 +28,8 @@ export interface Slot {
   level: number;
   /** alpha cutoff of its alpha-tested triangles (0: none) */
   cutoff: number;
+  /** metres of lift per metre of eye distance */
+  lift: number;
 }
 
 export class GpuScene {
@@ -96,7 +98,7 @@ export class GpuScene {
           const m = scene.meshes[mi];
           this.slots.push({ level: li,
             mesh: mi, indexCount: m.indices.length, firstIndex: where[mi].firstIndex, baseVertex: where[mi].baseVertex,
-            visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones, cutoff: m.mask?.cutoff ?? 0,
+            visibleBase: visibleTotal, capacity: b.count, cls: m.cls, tone: m.tone, hasTone: !!m.tones, cutoff: m.mask?.cutoff ?? 0, lift: m.lift ?? 0,
           });
           visibleTotal += b.count;
           tris += (m.indices.length / 3) * b.count;
@@ -107,6 +109,8 @@ export class GpuScene {
       const m0 = levels.map(levelMeshes).find((x) => x.length)?.[0];
       const bd = g?.bounds ?? (m0 !== undefined ? { center: scene.meshes[m0].center, radius: scene.meshes[m0].radius } : { center: [0, 0, 0], radius: 0 });
       bu.set([first, levels.length | (shadowFrom << 8), b.first, b.count], bi * 16);
+      // (info.z: the distance beyond which it casts no shadow; the shader does not read the first instance)
+      bf[bi * 16 + 2] = g?.shadowTo ?? 1e9;
       bf.set([...levels.map((l) => l.to), ...Array(4 - levels.length).fill(1e9)], bi * 16 + 4);
       bf.set([...bd.center, bd.radius], bi * 16 + 8);
       bu.set(spans, bi * 16 + 12);

@@ -38,8 +38,8 @@ struct Frame {
   refl: vec4f,            // the shore's reflection on the water: gain (0 none), fade (screen px at 1664 wide, 0: the default)
   shotDir: vec4f,         // the look's viewpoint looks along (x, z); ripple lines (amount), wave rows (1: 水纹)
   gains: vec4f,           // crown ink, roof ink, leaf marks, joints (1: as the 苏堤 look)
-  lines: vec4f,           // lines full at this distance (m), gone at this one (log scale); snow (0 … 1); unused
-  veil: vec4f,            // the woods paling upward into haze: from y0 to y1 (m), amount; unused
+  lines: vec4f,           // lines full at this distance (m), gone at this one (log scale); snow (0 … 1); ridgeFrom (m)
+  veil: vec4f,            // the woods paling upward into haze: from y0 to y1 (m), amount; rock painting (gain)
   fieldNear: vec4f,       // the near heightfield texture: origin (x, z), cell (m), width (samples)
   fieldNearB: vec4f,      // … depth (samples), 1 when there is one
   fieldFar: vec4f,        // the far one
