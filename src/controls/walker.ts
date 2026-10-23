@@ -17,6 +17,8 @@ export class Walker {
   dragSensitivity = 0.004;
   /** the ground under (x, z), for walking (NaN: none) */
   ground: (x: number, z: number) => number = () => 0;
+  /** may a walker step to (x, z) from ground height fromG? (water, buildings, a wall of rock stop it) */
+  free: (x: number, z: number, fromG?: number) => boolean = () => true;
   readonly keys = new Set<string>();
   private vel: [number, number, number] = [0, 0, 0];
   private drag: { x: number; y: number } | null = null;
@@ -77,7 +79,17 @@ export class Walker {
     if (Math.hypot(...this.vel) < 0.01 && len === 0) { this.vel = [0, 0, 0]; }
     const p = c.position;
     const before = p.join();
-    p[0] += this.vel[0] * dt; p[1] += this.vel[1] * dt; p[2] += this.vel[2] * dt;
+    if (this.mode === 'walk') {
+      // a blocked step slides along whichever axis is still free (along a wall or the water's edge)
+      const g0 = this.ground(p[0], p[2]);
+      const nx = p[0] + this.vel[0] * dt, nz = p[2] + this.vel[2] * dt;
+      if (this.free(nx, nz, g0)) { p[0] = nx; p[2] = nz; }
+      else if (this.free(nx, p[2], g0)) { p[0] = nx; this.vel[2] = 0; }
+      else if (this.free(p[0], nz, g0)) { p[2] = nz; this.vel[0] = 0; }
+      else { this.vel[0] = 0; this.vel[2] = 0; }
+    } else {
+      p[0] += this.vel[0] * dt; p[1] += this.vel[1] * dt; p[2] += this.vel[2] * dt;
+    }
     const g = this.ground(p[0], p[2]);
     if (this.mode === 'walk' && Number.isFinite(g)) p[1] = g + this.eyeHeight;
     else if (Number.isFinite(g)) p[1] = Math.max(p[1], g + 0.5);

@@ -9,7 +9,8 @@ import { Renderer, type FrameStats } from '../render/renderer';
 import { DEFAULT_STYLE, type InkStyle } from '../ink/style';
 import { Walker } from '../controls/walker';
 import type { LookData, SceneData, Viewpoint } from '../scene/types';
-import { addTerrain, groundAt } from '../terrain/chunks';
+import { addTerrain } from '../terrain/chunks';
+import { Walkable } from '../controls/walkable';
 
 export interface EngineOptions {
   canvas: HTMLCanvasElement;
@@ -54,11 +55,15 @@ export class Engine {
     this.scene = data;
     this.renderer.sun = data.sun;
     this.sceneStats = this.renderer.setScene(data);
-    this.walker.ground = (x, z) => groundAt(data, x, z);
+    const W = (this.walkable = new Walkable(data));
+    this.walker.ground = (x, z) => W.groundAt(x, z);
+    this.walker.free = (x, z, fromG) => W.free(x, z, fromG);
     if (data.viewpoints[0]) this.goTo(data.viewpoints[0]);
     return this.sceneStats;
   }
 
+  /** where the walker may stand in the scene */
+  walkable?: Walkable;
   /** the look painted now (null: the scene's sun and the base style) */
   look: LookData | null = null;
 

@@ -79,6 +79,13 @@ export interface Viewpoint {
   look?: number;
 }
 
+/** where a walker may stand beyond the terrain (docs/SCENE_FORMAT.md, Walking) */
+export interface WalkData {
+  waterBelow?: number;
+  decks?: { origin: [number, number]; dir: [number, number]; halfWidth: number; halfLength: number; rail?: number; profile: { from: number; step: number; y: number[] } }[];
+  blockers?: ({ circle: [number, number, number] } | { rect: [number, number, number, number, number] })[];
+}
+
 /** a time and season a world is painted in */
 export interface LookData {
   id: number;
@@ -113,6 +120,7 @@ export interface SceneData {
   sun: [number, number, number];
   viewpoints: Viewpoint[];
   looks?: LookData[];
+  walk?: WalkData;
 }
 
 export const INSTANCE_BYTES = 64;
