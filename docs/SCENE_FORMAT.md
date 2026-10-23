@@ -147,6 +147,17 @@ A scene the size of a city does not fit one file or one upload:
   demo reads `ranges` = far ranges painted on the sky, in degrees: base elevation, step, ridge amplitude, count,
   azimuth centre, half width, ink, mist fade). `sun` at the top level is the first look's.
 
+## Walking
+
+* **`walk`**: where a walker may stand, beyond the terrain:
+  `{ "waterBelow": 0.3, "decks": [{ "origin": [x, z], "dir": [dx, dz], "halfWidth", "halfLength", "rail": 0.45,
+  "profile": { "from", "step", "y": [ … ] } }], "blockers": [{ "circle": [x, z, r] } | { "rect": [cx, cz, halfW,
+  halfD, rotY] }] }`. The ground is the higher of the terrain and a deck. A deck is a rectangle in its own frame
+  (`origin`, `dir` the world direction of its length, its width across it) whose height along its length is sampled in
+  `profile` (`y[i]` at `from + i · step` m, linear between); the outer `rail` metres of its width are not walkable.
+  Without a deck, ground lower than `waterBelow` is water and stops the walker at its edge. Blockers (buildings,
+  houses, rocks, pagodas: rotation `rotY` about Y, the rectangle's local z = (sin rotY, cos rotY)) cannot be entered.
+
 ## What a version-0 exporter leaves out
 
 The sky (the engine paints its own), mist, smoke and spray particles, shadow-only stand-ins, camera-facing impostors,
