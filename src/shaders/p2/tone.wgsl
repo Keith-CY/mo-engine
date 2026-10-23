@@ -45,6 +45,8 @@ fn toneAt(p: vec2i) -> f32 {
   if (A.z <= 0.0) {
     // the sky: bright, a little darker overhead; at night the sky is dark and the moon a bright disc
     var t = mix(TONE_SKY_HORIZON, TONE_SKY_ZENITH, smoothstep(0.0, 0.6, dirW.y));
+    // its clouds, as the photograph shows them: bright tops, grey bases (the painter's washes come from these)
+    if (K.look2.z > 0.0 && K.sh3.y < 0.5) { let c = cloudsAt(dirW); t = mix(t, 0.97, c.x) - 0.12 * c.y; }
     if (K.sh3.y > 0.5) {
       let ang = acos(clamp(dot(dirW, F.sun.xyz), -1.0, 1.0));
       t = 0.08 + 0.6 * (1.0 - smoothstep(0.016, 0.02, ang)) + 0.25 * exp(-ang / 0.05);

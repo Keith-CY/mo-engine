@@ -423,15 +423,6 @@ fn bandOf(Bd: vec4f, P: vec3f, n: f32) -> f32 {
   return along * low * Bd.z;
 }
 /** clouds on a layer ~2 km up, seen from the eye (fixed to the world): (coverage, the shaded underside) */
-fn cloudsAt(dirW: vec3f) -> vec2f {
-  if (dirW.y <= 0.01) { return vec2f(0.0); }
-  let q = (F.eye.xz + dirW.xz * ((2000.0 - F.eye.y) / dirW.y)) / 900.0;
-  let n = fbm3(vec3f(q, 0.7), 4);
-  let cover = smoothstep(0.44, 0.58, n) * smoothstep(0.01, 0.08, dirW.y);
-  let nU = fbm3(vec3f(q + vec2f(0.0, -0.06), 0.7), 4);
-  return vec2f(cover, clamp((n - nU) * 6.0, 0.0, 1.0) * cover);
-}
-
 /** albedo × light of a G-buffer texel (−1: no surface); and the albedo alone (slab joints without the cast shadows) */
 // (the sky's B is cleared to zero and every surface has some albedo: one fetch tells them apart)
 fn gShade(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } return b.z * (0.6 * max(b.x, 0.0) + max(b.y, 0.0)); }
@@ -547,9 +538,16 @@ fn fs(v: VOut) -> @location(0) vec4f {
     var RNG = vec3f(0.0);
     if (!night) {
       RNG = paintedRanges(dirW);
-      if (K.look2.z > 0.0) { cl = cloudsAt(dirW) * min(1.0, K.look2.z * 2.0); }
+      if (K.look2.z > 0.0) { cl = cloudsAt(dirW); }
       if (RNG.z > 0.0) { w1 = max(w1, RNG.x * inkGain * (1.0 - 0.8 * cl.x)); }
-      w1 = max(w1 * (1.0 - 0.7 * cl.x), 0.32 * cl.y);
+      // the clouds drawn from the tone, as linan's painter draws its photograph's: a soft grey wash where a cloud's
+      // base is darker than the broad tone round it, the lit tops left paper
+      let wns = vnoise3(dirW * vec3f(9.0, 30.0, 9.0));
+      // (and the shaded base itself, as the targets paint it: a grey wash under each cloud, a breath of grey at its rim)
+      if (K.look2.z > 0.0) {
+        let rimC = smoothstep(0.0, 0.25, cl.x) * (1.0 - smoothstep(0.35, 0.8, cl.x));
+        w1 = max(w1 * (1.0 - 0.8 * cl.x), K.look2.z * (0.5 * cl.y * (0.7 + 0.3 * wns) + 0.35 * rimC));
+      }
     }
     let glowW = K.look5.x * exp(-sunAng / 0.075);
     if (!night) { w1 *= (1.0 - 0.9 * clamp(glowW, 0.0, 1.0)) * select(1.0, 0.5, K.look5.x > 0.0); }
@@ -588,6 +586,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
       absS += K.skyTint.rgb * K.skyTint.w * (0.25 + 0.75 * up) * select((1.0 - cl.x) * (1.0 - 0.6 * RNG.x), 1.0 - smoothstep(0.42, 0.55, tSs), night);
       if (night) { absS += K.skyTint.rgb * K.skyTint.w * 0.35 * (1.0 - smoothstep(0.42, 0.55, tSs)); }
     }
+    if (u32(K.inkAbs.w + 0.5) == 1u) { return vec4f(inkS, cl.x, cl.y, 1.0); }   // (debug view 1 on the sky: its wash, the clouds)
     var colS = paper * exp(-absS) * exp(-K.inkAbs.rgb * K.tint.rgb * inkS * 2.4);
     if (K.look5.x > 0.0 && !night) { colS = mix(colS, vec3f(1.0, 0.985, 0.94), K.look5.x * exp(-sunAng / 0.012) * 0.9); }
     return vec4f(clamp(colS, vec3f(0.0), vec3f(1.0)), 1.0);

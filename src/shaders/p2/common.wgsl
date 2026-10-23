@@ -98,6 +98,24 @@ fn rot2(v: vec2f, a: f32) -> vec2f { let c = cos(a); let s = sin(a); return vec2
 fn markOn(hx: f32, dens: f32) -> f32 { return clamp((dens - hx) * 16.0, 0.0, 1.0); }
 fn fmodp(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
 
+/** fair-weather cumulus, as linan's sky draws them for its photograph: rounded heaps a dozen degrees across, a few
+ *  high, low over the horizon and thinning toward the zenith — directions only (as far as the sky: a turn moves them
+ *  rigidly, walking does not). → (cover, the shaded base, low on each heap) */
+fn cloudsAt(dirW: vec3f) -> vec2f {
+  if (dirW.y <= 0.004) { return vec2f(0.0); }
+  let el = asin(clamp(dirW.y, -1.0, 1.0));
+  let d2 = normalize(dirW.xz + vec2f(1e-6, 0.0));
+  // (the azimuth on the unit circle: no seam)
+  let q = vec3f(d2 * 4.5, el * 12.0);
+  let w = vec2f(fbm3(q * 1.4 + vec3f(7.1, 0.0, 2.0), 3), fbm3(q * 1.4 + vec3f(3.3, 5.0, 0.0), 3)) - 0.5;
+  let qw = q + vec3f(0.5 * w.x, 0.5 * w.y, 0.35 * w.x);
+  let n = fbm3(qw, 5);
+  let band = smoothstep(0.03, 0.1, el) * (1.0 - smoothstep(0.45, 0.85, el));
+  let cover = smoothstep(0.53, 0.62, n) * band;
+  let nU = fbm3(qw + vec3f(0.0, 0.0, 0.1), 5);
+  return vec2f(cover, smoothstep(0.01, 0.07, n - nU) * cover);
+}
+
 /** the eye-relative world point under uv (y down) at view depth D, and the direction to it */
 fn relDir(uv: vec2f) -> vec3f {
   let q = F.invViewProj * vec4f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
