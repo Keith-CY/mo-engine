@@ -19,7 +19,7 @@ import PAINT from '../shaders/p2/paint.wgsl';
 const SHOT: Record<string, unknown> = { near: 40, far: 2600, cunFar: 3500, mi: 900, ridge: 70, ridgeFrom: 900, tone: [1, 1], sky: 0, water: 0.08, waves: 0.25, waveMode: 0, warm: 0, night: 0 };
 /** the 纯水墨 style (linan's STYLES.mo over BASE) */
 export const STYLE_MO = {
-  paperCol: [0.95, 0.925, 0.872], inkAbs: [1.0, 1.0, 0.94], age: 0.25, inkGain: 1.05, washGamma: 1.5, washLo: 0.32, layers: 3.5, pool: 0.45,
+  paperCol: [0.965, 0.945, 0.9], inkAbs: [1.0, 1.0, 0.94], age: 0.12, inkGain: 1.05, washGamma: 1.5, washLo: 0.32, layers: 3.5, pool: 0.45,
   gran: 0.25, line: 1.0, lineW: 0.8, wobble: 1.2, dry: 0.35, cun: 1.0, cunKind: 1, dots: 1.0, moss: 1.0, waves: 1.0,
 };
 /** the photograph's tone, calibrated against linan's own (?inkDebug=tone) */

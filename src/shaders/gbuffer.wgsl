@@ -243,6 +243,10 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let kind = v.flags >> 16u;
   let bench = u32(F.layering.z + 0.5);
   if (alpha == 1u && a < D.cutoff && (bench & 4u) == 0u) { discard; }
+  // a flowering crown is mostly air, as the references paint it: clusters of blossom along the limbs with the ground
+  // and the sky between them (holes in smooth world-anchored noise, so they hold still as the eye moves)
+  // (only where the holes are a few pixels across: finer, they would shimmer as the eye moves)
+  if (v.cls == 16u && alpha == 1u && v.depth * F.params.x < 0.1 && vnoise(wp * 2.4 + vec3f(3.1, 0.7, 5.3)) * 0.65 + vnoise(wp * 5.5) * 0.35 < 0.52) { discard; }
   var bbDark = 0.0;
   if (D.billboard != 0u) {
     let bb = billboardShape(D.billboard - 1u, v.uv, f32(v.seed & 0xffffu) / 65535.0);

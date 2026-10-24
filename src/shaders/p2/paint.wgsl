@@ -236,6 +236,71 @@ fn miDots(p: vec2f, S: f32, dens: f32, seed: f32) -> f32 {
   return min(cov, 1.0);
 }
 
+// ---- a tree's boughs as the references draw them: a few dark limbs from the fork, thick at the trunk and tapering,
+// painted in the tree's own frame (p: m across the line of sight and up from the trunk's foot; sc the tree's scale).
+// x: coverage, y: m to the nearest limb (blossom gathers along them). Willow limbs arch out and droop; a peach's fan up.
+fn boughs(p: vec2f, sc: f32, pxu: f32, seed: f32, willow: bool) -> vec2f {
+  var cov = 0.0; var dmin = 1e9;
+  let fork = vec2f(0.0, select(1.1, 2.6, willow) * sc);
+  let n = select(6, 5, willow);
+  for (var k = 0; k < n; k++) {
+    let h = h43(vec3i(i32(seed), k, 913));
+    let side = select(-1.0, 1.0, (f32(k) + h.x * 0.8) % 2.0 >= 1.0);
+    var a = fork + vec2f(side * 0.15 * sc * h.y, -0.4 * sc * h.z);
+    var m = vec2f(0.0); var b = vec2f(0.0);
+    if (willow) {
+      m = fork + vec2f(side * (0.7 + 1.3 * h.y), 1.4 + 1.8 * h.z) * sc;
+      b = m + vec2f(side * (0.9 + 1.0 * h.w), 0.3 - 1.4 * h.x) * sc;
+    } else {
+      m = fork + vec2f(side * (0.3 + 0.8 * h.y), 0.7 + 0.8 * h.z) * sc;
+      b = m + vec2f(side * (0.4 + 0.9 * h.w), 0.5 + 0.9 * h.x) * sc;
+    }
+    let w = max(pxu * 0.55, select(0.07, 0.1, willow) * sc);
+    let wt = max(pxu * 0.4, 0.015 * sc);
+    let c1 = segCov(p, a, m, w, w * 0.6, pxu * 0.8);
+    let c2 = segCov(p, m, b, w * 0.6, wt, pxu * 0.8);
+    cov = max(cov, max(c1, c2) * (0.75 + 0.25 * h.w));
+    // (distance to the limb's outer half, where the twigs and blossom are)
+    let pb = p - m; let bb = b - m;
+    let hb = clamp(dot(pb, bb) / max(dot(bb, bb), 1e-6), 0.0, 1.0);
+    dmin = min(dmin, length(pb - bb * hb));
+  }
+  return vec2f(cov, dmin);
+}
+/** willow strands as the references paint them: long thin threads hanging straight down, each a run of small leaf
+ *  dashes with gaps, a gentle sway; spaced in the world (0.2 m × scale) and thinned to a wash as they get finer than
+ *  a few pixels */
+fn willowThreads(p: vec2f, sc: f32, pxu: f32, dens: f32, seed: f32) -> f32 {
+  let S0 = 0.2 * sc;
+  let l = log2(max(3.5 * pxu / S0, 1.0)); let l0 = floor(l); let lt = l - l0;
+  var out = 0.0;
+  for (var L = 0; L < 2; L++) {
+    let wl = select(1.0 - lt, lt, L == 1);
+    if (wl < 0.01) { continue; }
+    let S = S0 * exp2(l0 + f32(L));
+    let gi = floor(p.x / S);
+    var cov = 0.0;
+    for (var i = -1; i <= 1; i++) {
+      let col = gi + f32(i);
+      let h = h43(vec3i(i32(col), i32(seed), 37 + L));
+      let x0 = (col + 0.2 + 0.6 * h.y) * S;
+      let sway = 0.06 * sc * sin(p.y / (1.1 * sc) + h.w * 6.28);
+      let w = max(pxu * 0.35, 0.012 * sc);
+      let dx = abs(p.x - x0 - sway);
+      if (dx > w + pxu) { continue; }
+      // runs of 1–2.5 m with gaps, each run a chain of leaf dashes
+      let seg = floor(p.y / (1.6 * sc) + h.z);
+      let hs = h43(vec3i(i32(col), i32(seg), i32(seed) + 71));
+      let on = markOn(hs.x, dens);
+      let dash = smoothstep(0.15, 0.3, fract(p.y / max(0.11 * sc, pxu * 3.0) + h.x * 7.0)) * smoothstep(0.95, 0.8, fract(p.y / max(0.11 * sc, pxu * 3.0) + h.x * 7.0));
+      let cv = smoothstep(w + pxu * 0.7, w - pxu * 0.2, dx) * mix(1.0, dash, 0.7) * on;
+      cov = max(cov, cv * (0.55 + 0.45 * hs.w));
+    }
+    out += wl * cov;
+  }
+  return out;
+}
+
 // ---- ripple lines on the water plane (world XZ in the look's frame, rows spread so they keep a screen spacing)
 fn ripples(P: vec3f, fp: f32, dens: f32, sinG: f32, sinW: f32) -> f32 {
   let uK = K.res.z;
@@ -383,15 +448,18 @@ fn paintedRanges(dirW: vec3f) -> vec3f {
     let kk = f32(n - 1) - fk;
     let base = R.x + kk * R.y;
     let amp = R.z * (0.55 + 0.45 * kk / max(f32(n - 1), 1.0)) * win;
-    let ridge = base + amp * ridgeLine(d2, fk) - (1.0 - win) * select(0.05, 0.16, match_);
-    if (el < ridge) {
+    var ridge = base + amp * ridgeLine(d2, fk) - (1.0 - win) * select(0.05, 0.16, match_);
+    // (the references' far hills have woods on their crests: a ridge broken by small bumps a few pixels high, and
+    // no hard edge)
+    if (match_ && K.sh3.z < 0.5) { ridge += (vnoise2(vec2f(az / (pxA * uK * 6.0), fk * 13.0)) - 0.5) * pxA * uK * 5.0; }
+    if (el < ridge + select(0.0, pxA * uK * 2.0, match_)) {
       let below = ridge - el;
       let fade = RB.w * select(0.7 + 0.5 * vnoise2(d2 * 14.0 + fk), 0.85 + 0.3 * vnoise2(d2 * 4.0 + fk), match_);
       let ink = RB.z * mix(0.28, 1.0, fk / max(f32(n - 1), 1.0));
       let tq = select(vec2f(az * 320.0, el * 700.0), vec2f(az * 60.0, el * 90.0), match_);
       var tex = smoothstep(0.35, 0.75, vnoise2(tq + fk * 7.0) * 0.6 + vnoise2(tq * vec2f(2.3, 1.9) + 3.0) * 0.4);
       if (match_) { tex = 0.5 + 0.5 * (tex - 0.5); }
-      let crisp = select(0.3, 0.08, match_);
+      let crisp = select(0.3, 0.0, match_);
       var w = ink * (crisp * exp(-below / (fade * 0.12)) + (1.0 - crisp) * exp(-below / fade) * (0.6 + 0.6 * tex * exp(-below / (fade * 0.6))));
       if (match_ && K.sh3.z > 0.5) {
         // a snowy range: left as paper, drawn by its ridge line, a few crevices and the spurs' shade
@@ -405,11 +473,16 @@ fn paintedRanges(dirW: vec3f) -> vec3f {
         let spur = smoothstep(0.5, 0.62, sp0) * (0.6 + 0.4 * vnoise2(qp / 12.0));
         let dn = exp(-below / (fade * 0.9));
         let mot = vnoise2(d2 * 9.0 + fk * 4.1);
+        // (the references' snowy peaks: grey on their shaded spurs and in the gullies, the snow left paper, the crest
+        // only a broken breath of a line)
         w = select(ink * 0.22 * exp(-below / fade) * (0.4 + 0.9 * mot) * smoothstep(0.0, pxA * 3.0 * uK, below),
-                   ink * (0.9 * line + 0.6 * crev * exp(-below / (fade * 0.45)) + 0.28 * spur * dn), kk < 0.5);
+                   ink * (0.3 * line + 0.75 * crev * exp(-below / (fade * 0.45)) + 0.5 * spur * dn + 0.1 * dn * mot), kk < 0.5);
       } else if (match_) {
         let mot = vnoise2(d2 * (7.0 + 2.0 * fk) + fk * 4.1) * 0.65 + vnoise2(d2 * 23.0 + fk * 1.7) * 0.35;
-        w *= (0.35 + 0.95 * smoothstep(0.25, 0.75, mot)) * smoothstep(0.0, pxA * 2.5 * uK, below);
+        // the woods on it in fine dots, thickest under the crest; the crest itself feathered into the sky
+        let qd = vec2f(az, el) / (pxA * uK * 3.5) + fk * 7.0;
+        let dots = smoothstep(0.5, 0.78, vnoise2(qd) * 0.7 + vnoise2(qd * 2.1 + 3.0) * 0.3) * exp(-below / (fade * 0.5));
+        w *= (0.35 + 0.95 * smoothstep(0.25, 0.75, mot)) * (1.0 + 0.45 * dots) * smoothstep(-pxA * 2.0 * uK, pxA * 4.0 * uK, below);
       }
       res = vec3f(w, exp(-below / fade), fk + 1.0);
     }
@@ -435,6 +508,8 @@ fn bandOf(Bd: vec4f, P: vec3f, n: f32) -> f32 {
 fn gShade(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } return b.z * (0.6 * max(b.x, 0.0) + max(b.y, 0.0)); }
 fn gAlb(p: vec2i) -> f32 { let b = texB(p); if (b.z <= 0.0) { return -1.0; } return b.z; }
 fn originOf(ii: u32) -> vec3f { return vec3f(bitcast<f32>(inst[ii * 16u + 9u]), bitcast<f32>(inst[ii * 16u + 10u]), bitcast<f32>(inst[ii * 16u + 11u])); }
+/** an instance's vertical scale (its matrix's Y column) */
+fn scaleOf(ii: u32) -> f32 { return length(vec3f(bitcast<f32>(inst[ii * 16u + 3u]), bitcast<f32>(inst[ii * 16u + 4u]), bitcast<f32>(inst[ii * 16u + 5u]))); }
 
 /** the brush line through the nearest seed of the jump flood (J): its strength, width, direction and type → the line's
  *  ink and its 洇 beside it */
@@ -538,11 +613,12 @@ fn fs(v: VOut) -> @location(0) vec4f {
   var RG = textureLoad(tRidge, min(gp / 2, rsz - 1), 0);
   var rdist = RG.r;
   // the far washes grade from a smoothed ridge (trees along a ridge make the distance jump from column to column)
-  if (match_ && rdist < 998.0 && D > ridgeFrom * 0.45) {
+  // (wide: a wooded skyline's ridge jumps from column to column, and a narrow average leaves vertical streaks)
+  if (match_ && rdist < 998.0 && D > ridgeFrom * 0.3) {
     var sum = min(rdist, 400.0); var nn = 1.0;
-    for (var i = -3; i <= 3; i++) {
+    for (var i = -4; i <= 4; i++) {
       if (i == 0) { continue; }
-      let r2 = textureLoad(tRidge, clamp(gp / 2 + vec2i(i32(f32(i) * 2.0 * uK), 0), vec2i(0), rsz - 1), 0).r;
+      let r2 = textureLoad(tRidge, clamp(gp / 2 + vec2i(i32(f32(i) * 6.0 * uK), 0), vec2i(0), rsz - 1), 0).r;
       if (r2 < 998.0) { sum += min(r2, 400.0); nn += 1.0; }
     }
     rdist = sum / nn;
@@ -580,8 +656,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let wns = vnoise3(dirW * vec3f(9.0, 30.0, 9.0));
       // (and the shaded base itself, as the targets paint it: a grey wash under each cloud, a breath of grey at its rim)
       if (K.look2.z > 0.0) {
+        // (as the references paint fair-weather heaps: the lit tops paper, the bases a soft grey, no outline; the open
+        // sky round them a breath of wash so the tops stand out)
         let rimC = smoothstep(0.0, 0.25, cl.x) * (1.0 - smoothstep(0.35, 0.8, cl.x));
-        w1 = max(w1 * (1.0 - 0.8 * cl.x), K.look2.z * (0.5 * cl.y * (0.7 + 0.3 * wns) + 0.35 * rimC));
+        let openSky = 0.12 * smoothstep(0.0, 0.12, dirW.y) * (1.0 - cl.x) * min(K.look2.z * 2.0, 1.0);
+        w1 = max(w1 * (1.0 - 0.85 * cl.x) + openSky, K.look2.z * (0.42 * cl.y * (0.7 + 0.3 * wns) + 0.04 * rimC));
       }
     }
     let glowW = K.look5.x * exp(-sunAng / 0.075);
@@ -642,6 +721,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // a pale ground: the ground, the grass and the paving take the painter's light only, not the trees' cast shadows
   let gLift = K.look5.w > 0.0 && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE) && !night;
   if (gLift) { plit = mix(plit, mix(plB, LL.y, 0.4), K.look5.w); }
+  // (and in every look the ground, the grass and the paving carry no cast shadows: the references paint none, and
+  // a wood's shadow on a path reads as camouflage blotches)
+  else if (match_ && !night && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE)) { plit = mix(plB, LL.y, 0.4); }
   let shade = 1.0 - plit;
   let farS = smoothstep(ridgeFrom * 0.5, ridgeFrom, D) * select(0.0, 1.0, isLand(cls) || isFol(cls) || cls == C_CITYFAR);
   tF = mix(tF, tB, farS * 0.5);
@@ -664,15 +746,27 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (tree && !night) {
     let under = smoothstep(0.0, 1.0, (Cw.y + 9.0 - P.y) / 9.0);
     w0 = max(w0, (0.22 + 0.38 * max(shade, under * 0.75)) * select(1.0, 0.5, cls == C_WILLOW) * K.look.y);
-    if (match_ && cls == C_BLOSSOM) { crownW = 0.05 + 0.08 * shade; w0 = crownW; }
-    if (match_ && cls != C_BLOSSOM) {
+    // (willow and blossom crowns are left paper, as the references leave them: their threads, limbs and flowers
+    // carry them)
+    // (far off, where its holes close, a flowering crown is a soft pale mass)
+    if (match_ && cls == C_BLOSSOM) { crownW = mix(0.012 + 0.03 * shade, 0.1 + 0.14 * shade, smoothstep(0.06, 0.12, D * pxA)); w0 = crownW; }
+    // (where its threads get finer than a few pixels, a willow is a soft grey mass, as the references' far willows)
+    if (match_ && cls == C_WILLOW) {
+      let fw = smoothstep(0.035, 0.1, length(Cr) * pxA * uK / max(scaleOf(Cc.y), 0.3));
+      crownW = mix(0.02 + 0.045 * shade + 0.02 * under, 0.14 + 0.16 * shade + 0.06 * under, fw); w0 = crownW;
+    }
+    if (match_ && cls != C_BLOSSOM && cls != C_WILLOW) {
+      // a wood as the references paint it: each crown one dark mass, deeper underneath and on its shaded side (the
+      // light taken broad: the crown's cards would break a fine one into facets), clumps only a little deeper than the
+      // body, small paper gaps where the light falls; each tree a shade of its own (墨分五色)
       let O = Cw;
       let fpo = length(Cr) * pxA * uK;
       let hs = h13(vec3i(floor(O * 1.7)) + 91);
       let lp = vec2f(dot(P - O, camR), P.y - O.y);
-      let S = max(select(2.6, 1.6, cls == C_WILLOW), fpo * 16.0);
-      var sq = vec2f(1.0, 1.3);
-      if (cls == C_PINE) { sq = vec2f(0.8, 2.0); } else if (cls == C_WILLOW) { sq = vec2f(1.7, 0.55); }
+      let shC = 1.0 - smoothstep(0.1, 0.75, mix(plB, sunF, 0.25));
+      let S = max(select(2.2, 1.6, cls == C_PINE), fpo * 14.0);
+      var sq = vec2f(1.0, 1.25);
+      if (cls == C_PINE) { sq = vec2f(0.8, 2.0); }
       let g = lp * sq / S + hs * 37.0;
       let gU = g + vec2f(0.0, 0.3);
       let n0 = vnoise2(g) * 0.7 + vnoise2(g * 2.3 + 5.0) * 0.3;
@@ -680,21 +774,23 @@ fn fs(v: VOut) -> @location(0) vec4f {
       clumpBody = smoothstep(0.28, 0.52, n0);
       clumpB = clamp((nU - n0) * 6.0, 0.0, 1.0) * clumpBody;
       let grove = smoothstep(0.28, 0.72, vnoise2(O.xz / 55.0 + 3.3) * 0.7 + vnoise2(O.xz / 21.0 + 8.1) * 0.3);
-      let t5 = (0.6 + 0.8 * hs * hs) * mix(0.4, 1.35, grove);
-      crownW = (0.16 + 0.55 * shade + 0.2 * under + 0.3 * clumpB) * mix(0.35, 1.0, clumpBody) * t5;
-      if (cls == C_PINE) { crownW = crownW * 1.6 + 0.08; }
-      if (cls == C_WILLOW) { crownW *= 0.42; }
-      if (cls == C_MAPLE || cls == C_GINKGO) { crownW *= 0.75; }
-      crownW = max(crownW, w0 * 0.7 * mix(0.4, 1.0, clumpBody) * mix(1.0, 0.75, 1.0 - shade));
+      let t5 = (0.86 + 0.28 * hs) * mix(0.85, 1.12, grove);
+      crownW = (0.36 + 0.34 * shC + 0.16 * under + 0.12 * clumpB) * mix(0.82, 1.0, clumpBody) * t5;
+      if (cls == C_PINE) { crownW = crownW * 1.12 + 0.06; }
+      if (cls == C_MAPLE || cls == C_GINKGO) { crownW *= 0.62; }
+      // (the lit gaps: small dabs of paper on the side toward the light)
+      let gap = leafDots(lp + vec2f(17.3, 5.1), max(fpo * 6.0, 0.35), fpo, 0.55 * (1.0 - shC) * clumpBody, hs * 991.0 + 7.0, 0.0, 1.3);
+      crownW *= 1.0 - 0.55 * gap;
       w0 = crownW;
     }
   }
   if (cls == C_IVY && !night) { w0 = 0.42 + 0.25 * shade; }
-  if (cls == C_PAVE && !night) { w0 = 0.05 + 0.05 * shade; }
+  if (cls == C_BARK && !night && match_) { w0 = max(w0, 0.55 + 0.3 * shade); }
+  if (cls == C_PAVE && !night) { w0 = 0.11 + 0.08 * shade; }
   if (cls == C_BLOOM && !night) { w0 = 0.01 + 0.06 * shade; }
   if (cls == C_LOTUS && !night) { w0 = 0.5 + 0.3 * shade + 0.15 * smoothstep(0.4, 0.95, 1.0 - abs(Nw.y)); }
   // roofs: each plane one flat wash (界画), set by the painter's light, not by the cast shadows
-  if ((cls == C_ROOF || cls == C_CITYFAR) && !night) { w0 = mix(0.6, 0.32, smoothstep(0.2, 0.85, LL.y)); }
+  if ((cls == C_ROOF || cls == C_CITYFAR) && !night) { w0 = mix(0.78, 0.44, smoothstep(0.2, 0.85, LL.y)); }
   // 墨分五色 over a city: each building's roof its own depth of ink
   if (cls == C_ROOF && !night && K.mpatch.y > 0.0) {
     let bh = h13(vec3i(floor(Cw * 0.5)) + 313);
@@ -718,7 +814,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let mot = lodNoise(P * vec3f(1.0, 0.45, 1.0) + 17.0, fp * 70.0 * uK);
       let mot2 = lodNoise(P * vec3f(1.0, 0.3, 1.0) + 3.0, fp * 22.0 * uK);
       pv = smoothstep(0.15, 0.85, mix(plB, smoothstep(0.05, 0.65, sunF), 0.1));
-      rw = 0.17 + 0.24 * (1.0 - pv) + 0.2 * (mot - 0.5) + 0.08 * (mot2 - 0.5) + 0.14 * baseK + 0.3 * fis.y + 0.1 * fc2.x;
+      // (the references' rock is the deepest ink in the picture after the pines: grey on the lit faces, near black in
+      // the shaded ones and the clefts)
+      rw = 0.26 + 0.38 * (1.0 - pv) + 0.22 * (mot - 0.5) + 0.1 * (mot2 - 0.5) + 0.14 * baseK + 0.32 * fis.y + 0.12 * fc2.x;
       if (cls == C_NICHE) { rw = 0.3 + 0.12 * (1.0 - pv) + 0.1 * (mot - 0.5) + 0.12 * smoothstep(0.35, 0.05, tF); }
       facetLine = max(fc2.y * 0.3, fis.x) * nearR * (0.6 + 0.4 * shade) * select(1.0, 0.35, cls == C_NICHE) * K.look2.x;
       // the face's own 皴: dry vertical streaks of the side brush, gathered in groups, deeper in shade
@@ -747,7 +845,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let rgd = exp(-rdist / max(uRidge * 1.7, 1.0));
     let mot = lodNoise(P * vec3f(1.0, 0.6, 1.0) + 5.0, fp * 110.0 * uK);
     let wPh = pow(clamp((1.0 - pow(clamp(tB * K.sh1.z, 0.0, 1.0), K.sh1.w) - 0.03) * 1.9, 0.0, 1.0), 1.1) * 0.5;
-    wGeo = 0.34 * dk * (0.3 + 0.7 * rgd) * (0.8 + 0.4 * shade) * (0.8 + 0.4 * mot) * select(1.0, 1.2, isFol(cls));
+    // (a far wood is a mid-grey mass that pales with distance, deepest under its crest: not paper with a dark rim)
+    wGeo = 0.38 * dk * (0.62 + 0.38 * rgd) * (0.8 + 0.4 * shade) * (0.8 + 0.4 * mot) * select(1.0, 1.2, isFol(cls));
     wGeo = mix(wGeo, max(wGeo, wPh * dk), 0.35) * inkGain;
     wGeo *= 1.0 - 0.75 * paperLift;
   }
@@ -763,15 +862,15 @@ fn fs(v: VOut) -> @location(0) vec4f {
   else if (cls == C_GINKGO) { mul = mix(0.3, 0.5, farW); }
   else if (isTree(cls)) { mul = mix(0.34, 0.5, farW); }
   // near flat ground is the paper itself; slopes and banks take the wash
-  else if (cls == C_GROUND) { mul = mix(mix(0.18 * K.look2.y, 1.0, smoothstep(0.12, 0.5, 1.0 - Nw.y)), 1.0, farW); }
-  else if (cls == C_SMALL) { mul = 0.08; }
+  else if (cls == C_GROUND) { mul = mix(mix(0.4 * K.look2.y, 1.0, smoothstep(0.12, 0.5, 1.0 - Nw.y)), 1.0, farW); }
+  else if (cls == C_SMALL) { mul = select(0.08, 0.3, match_); }
   else if (cls == C_IVY || cls == C_PAVE || cls == C_BLOOM) { mul = 1.0; }
   else if (cls == C_LOTUS) {
     let lh = mix(h13(vec3i(floor(Cw * 3.1)) + 57), smoothstep(0.2, 0.8, lodNoise(vec3f(P.x, 0.0, P.z) + 9.0, 1.6)), 0.55);
     mul = (0.12 + 1.0 * lh * lh) * mix(1.15, 0.45, smoothstep(near * 0.5, near * 3.0, D)) * mix(0.35, 1.0, idk);
   }
-  else if (cls == C_WALL || cls == C_SNOW) { mul = 0.5; }
-  else if (cls == C_ROOF || cls == C_CITYFAR) { mul = 0.55; }
+  else if (cls == C_WALL || cls == C_SNOW) { mul = select(0.5, 0.75, cls == C_WALL && match_); }
+  else if (cls == C_ROOF || cls == C_CITYFAR) { mul = 0.72; }
   else if (cls == C_DARK) { mul = 0.65; }
   else if (isArch(cls)) { mul = 0.62; }
   var wn = lodNoise(P, fp * 45.0 * uK);
@@ -781,7 +880,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_ROOF || cls == C_CITYFAR) { mul *= K.look.z; }
   // aerial perspective: everything pales with distance (the paper shows through)
   if (cls != C_SKY) { mul *= mix(1.0, 0.5, smoothstep(near * 2.0, far * 1.2, D)); }
-  if (cls != C_SKY && cls != C_WATER && cls != C_FIGURE) { mul *= select(mix(select(0.55, 0.35, match_), 1.0, idk), mix(select(0.6, 0.5, match_), 1.0, idk), isArch(cls)); }
+  if (cls != C_SKY && cls != C_WATER && cls != C_FIGURE) { mul *= select(mix(select(0.55, 0.55, match_), 1.0, idk), mix(select(0.6, 0.62, match_), 1.0, idk), isArch(cls)); }
   // range behind range: each farther one paler
   if (isLand(cls) || isFol(cls)) { mul *= mix(1.0, 0.4, smoothstep(ridgeFrom * 1.5, ridgeFrom * 10.0, D)); }
   var w1 = w0 * mul * inkGain;
@@ -828,7 +927,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let p2 = smoothstep(0.35, 0.75, p2n);
     let patches = smoothstep(0.3, 0.8, patchN);
     let nearG = 1.0 - smoothstep(far * 0.25, far * 0.7, Ds);
-    let gw = (0.03 + 0.1 * patches + 0.06 * p2 + 0.03 * st * patches + 0.1 * baseK) * mix(0.45, 1.0, idk) * nearG * min(K.look2.y, 2.5);
+    let gw = (0.1 + 0.14 * patches + 0.08 * p2 + 0.06 * st * patches + 0.12 * baseK + 0.08 * shade) * mix(0.6, 1.0, idk) * nearG * min(K.look2.y, 2.5);
     w1 = max(w1, gw * inkGain);
   }
   // snow scenes: the water and the bark are inked so the snow can be left as paper (烘托)
@@ -878,7 +977,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let muv = uv - vec2f(0.0, 2.0 * RG.b * uK / K.res.y);
       let rl = min(smp(tBroad, muv).r, min(smp(tBroad, muv - vec2f(0.0, 14.0 * uK / K.res.y)).r, smp(tBroad, muv - vec2f(0.0, 30.0 * uK / K.res.y)).r));
       let rt = pow(clamp(rl * K.sh1.z, 0.0, 1.0), K.sh1.w);
-      var rk = exp(-RG.b / (70.0 + 50.0 * K.look5.x)) * (1.0 - smoothstep(150.0, 235.0, RG.b) * step(0.001, K.look5.x)) * (0.75 + 0.5 * lodNoise(vec3f(dot(P, camR) * 0.08, 0.0, dot(P, camF)) + 5.5, fp * 30.0 * uK));
+      var rk = exp(-RG.b / (45.0 + 25.0 * K.look5.x)) * (1.0 - smoothstep(150.0, 235.0, RG.b) * step(0.001, K.look5.x)) * (0.75 + 0.5 * lodNoise(vec3f(dot(P, camR) * 0.08, 0.0, dot(P, camF)) + 5.5, fp * 30.0 * uK));
       rk *= K.waterRefl.x * select(1.0, exp(-RG.b / K.waterRefl.y), K.waterRefl.y > 0.0);
       w1 = max(w1, smoothstep(0.25, 0.75, 1.0 - rt) * 0.75 * rk * (1.0 - 0.7 * path) * inkGain);
     }
@@ -901,7 +1000,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let under = smoothstep(0.62, 0.5, vnoise2(cu) * 0.55 + vnoise2(cu * vec2f(2.6, 1.8) + 4.0) * 0.3 + 0.075);
     w1 = max(w1, K.look6.w * band * (0.1 + 0.12 * under) * (1.0 - 0.85 * clamp(glowW * 1.4, 0.0, 1.0)));
   }
-  if (isArch(cls)) { w1 = min(w1, select(0.34, select(0.3, 0.55, K.mpatch.y > 0.0) * K.look.z, cls == C_ROOF)); }
+  if (isArch(cls)) { w1 = min(w1, select(0.34, select(0.42, 0.7, K.mpatch.y > 0.0) * K.look.z, cls == C_ROOF)); }
   // a far building (a pagoda across the lake) a dark silhouette in the haze
   if (match_ && isArch(cls) && !night) { w1 = max(w1, 0.36 * smoothstep(ridgeFrom * 0.8, ridgeFrom * 1.6, D) * inkGain); }
   // night: an ink night, dark and flat; the moon a clean disc of paper in a soft lighter halo; the lake a wash a
@@ -946,7 +1045,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     w1 = (0.36 + 0.1 * nearW + 0.05 * (sweep - 0.5)) * K.sh2.x * (1.0 - 0.95 * max(path, glint));
   }
   if (night) {
-    if (isLand(cls) || isFol(cls) || cls == C_CITYFAR) { w1 = (0.62 - 0.22 * exp(-RG.g / 14.0)) * K.sh2.x * mix(1.0, 0.75, smoothstep(far * 0.2, far, D)); }
+    if (isLand(cls) || isFol(cls) || cls == C_CITYFAR) { w1 = (select(0.62, 0.78, cls == C_WILLOW) - 0.22 * exp(-RG.g / 14.0)) * K.sh2.x * mix(1.0, 0.75, smoothstep(far * 0.2, far, D)); }
     if (cls == C_ROOF) { w1 = 0.5 * K.sh2.x; }
     if (cls == C_WOOD || cls == C_DARK) { w1 = 0.42 * K.sh2.x; }
     if (cls == C_WALL) { w1 = 0.26 * K.sh2.x; }
@@ -1033,7 +1132,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let kind = select(0.0, 1.0, cls == C_ROCK || cls == C_FIGURE || K.st2.w > 0.5);
     if (dens > 0.01 && cls != C_FIGURE) { cunInk = cunStrokes(P, Nw, fp, dens, kind) * 0.85; }
     cunInk *= select(mix(1.0, 0.25, farK), 1.0 - farW, match_);
-    if (cls == C_ROCK || cls == C_NICHE) { cunInk *= K.look2.x * select(1.0, 0.15, match_); }
+    if (cls == C_ROCK || cls == C_NICHE) { cunInk *= K.look2.x * select(1.0, 0.55, match_); }
   }
 
   // ---------------- grass: upright blades drawn with a dry brush (linan's grass has them from the photograph's own
@@ -1050,6 +1149,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
 
   // ---------------- leaf marks by species, 米点 far away
   var leaf = 0.0; var treeTone = 1.0;
+  var petal = 0.0; var thread = 0.0;   // (the flowers' and the willow threads' share of the marks: their colour)
   if (tree && (bench & 8u) == 0u && F_LEAF) {
     let O = Cw;
     let Do = length(Cr);
@@ -1060,20 +1160,38 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let tv = normalize(vec3f(-Cr.z, 0.0, Cr.x) + vec3f(1e-5, 0.0, 0.0));
     let lp = vec2f(dot(P - O, tv), P.y - O.y);
     var dens = K.st3.x * clamp(0.12 + 0.6 * shade + 0.45 * w0, 0.0, 0.95) * idk * idk;
-    if (crownW >= 0.0) { dens = K.st3.x * clamp(0.12 + 0.3 * shade + 0.6 * clumpB, 0.0, 0.9) * mix(0.4, 1.0, clumpBody) * idk; }
+    if (crownW >= 0.0) { dens = K.st3.x * clamp(0.3 + 0.4 * shade + 0.4 * clumpB, 0.0, 0.92) * mix(0.55, 1.0, clumpBody) * mix(0.6, 1.0, idk); }
     let mi = smoothstep(uMi * 0.8, uMi * 1.3, Do);
     var nearL = 0.0;
     let seed = floor(th * 997.0);
     if (mi < 0.999) {
       if (cls == C_PINE) { nearL = pineFans(lp, fpo * 21.0, fpo, clamp(0.1 + 0.8 * shade + 0.4 * w0, 0.0, 0.95) * K.st3.x * idk, seed) * select(1.0, 0.7 + 0.5 * clumpBody, crownW >= 0.0); }
+      else if (cls == C_WILLOW && match_) {
+        let sc = scaleOf(Cc.y);
+        let fw = smoothstep(0.035, 0.1, fpo / max(sc, 0.3));
+        var bg = boughs(lp, sc, fpo, seed, true);
+        bg.x *= 1.0 - fw;
+        let th = willowThreads(lp, sc, fpo, select(0.55 + 0.35 * shade, 0.85, paperLift > 0.5), seed);
+        nearL = max(th * 0.55, bg.x * 0.95);
+        thread = th * (1.0 - bg.x);
+      }
       else if (cls == C_WILLOW) { nearL = willowStrands(lp, fpo * 16.0, fpo, select(dens * 0.55, 0.85, paperLift > 0.5), seed); }
       else if (cls == C_MAPLE || cls == C_GINKGO) { nearL = lobedLeaves(lp, fpo * 10.0, fpo, clamp(dens * 1.3 + 0.15, 0.0, 0.95), seed, select(3.0, 5.0, cls == C_MAPLE)); }
-      else if (cls == C_BLOSSOM) { nearL = select(0.6 * leafDots(lp, fpo * 7.0, fpo, 0.6, seed, 1.0, 1.0), 0.3 * leafDots(lp, fpo * 5.0, fpo, 0.7, seed, 0.0, 1.0), match_); }
+      else if (cls == C_BLOSSOM && match_) {
+        // dark limbs and twigs, the flowers in small clusters along their outer halves (pink, in the colour below)
+        let sc = scaleOf(Cc.y);
+        let bg = boughs(lp, sc, fpo, seed, false);
+        let near = 1.0 - smoothstep(0.25 * sc, 0.8 * sc, bg.y);
+        let fl = leafDots(lp, max(fpo * 5.0, 0.12 * sc), fpo, 0.25 + 0.6 * near, seed, 0.0, 1.0) * (0.3 + 0.7 * near);
+        petal = fl * (1.0 - bg.x);
+        nearL = max(bg.x * 0.9, fl * 0.12);
+      }
+      else if (cls == C_BLOSSOM) { nearL = 0.6 * leafDots(lp, fpo * 7.0, fpo, 0.6, seed, 1.0, 1.0); }
       else { nearL = leafDots(lp, fpo * select(10.0, 5.5, crownW >= 0.0), fpo, dens, seed, 0.0, 1.5) * select(1.0, 0.55 + 0.45 * clumpB, crownW >= 0.0); }
     }
     var farL = 0.0;
     if (mi > 0.001) { farL = miDots(lp, fpo * 9.0, 0.85 * clamp(idk, 0.3, 1.0), seed); }
-    leaf = mix(nearL, farL * 0.6, mi) * (1.0 - smoothstep(cunFar * 0.7, cunFar * 1.4, Do)) * K.look5.y;
+    leaf = mix(nearL, farL * select(0.6, 0.15, cls == C_BLOSSOM || cls == C_WILLOW), mi) * (1.0 - smoothstep(cunFar * 0.7, cunFar * 1.4, Do)) * K.look5.y;
   }
 
   // ---------------- tile rows: lines running down each roof plane, a row every ~0.3 m across the slope, doubled in
@@ -1258,7 +1376,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // 纯水墨 with a touch of colour: pink blossom and lotus, red maple, gold ginkgo, the sky's own warmth
   if (K.look.w > 0.0) {
     var acc = vec3f(0.0);
-    if (cls == C_BLOSSOM) { acc = (P_ZHU * 0.42 + P_ZHE * 0.04) * select(1.0, 0.12 + 1.7 * leaf, match_); }
+    if (cls == C_BLOSSOM) { acc = (P_ZHU * 0.42 + P_ZHE * 0.04) * select(1.0, 0.05 + 1.4 * petal, match_); }
+    else if (cls == C_WILLOW && match_) { acc = (P_TENG * 0.35 + P_ZHE * 0.3) * thread; }
     else if (cls == C_MAPLE) { acc = P_ZHU * (1.0 + 0.4 * lit) + P_ZHE * 0.3; }
     else if (cls == C_GINKGO) { acc = P_TENG * 0.9 + P_ZHE * 0.35; }
     else if (cls == C_IVY) { acc = (P_TENG * 0.6 + P_ZHE * 0.5) * 0.45; }
@@ -1304,9 +1423,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let hp = select(0.0, (sm / sn - c0) / (sm / sn + 0.04) * 0.25, sn > 0.0 && c0 >= 0.0);
     var kk = 0.4;
     if (cls == C_PAVE) { kk = 0.35; } else if (cls == C_ROOF || cls == C_CITYFAR) { kk = select(0.75, 0.15, match_); }
-    else if (isArch(cls)) { kk = 1.0; } else if (isTree(cls)) { kk = select(0.8, 0.12, match_); } else if (cls == C_LOTUS) { kk = 0.7; }
+    else if (isArch(cls)) { kk = 1.0; } else if (isTree(cls)) { kk = select(0.8, 0.12, match_); } else if (cls == C_LOTUS) { kk = 0.15; }
     else if (cls == C_ROCK || cls == C_NICHE) { kk = select(0.5, 0.12, match_) * K.look2.x; } else if (cls == C_FIGURE) { kk = select(0.4, 0.2, match_); }
-    else if (cls == C_GROUND) { kk = 1.1; }
+    else if (cls == C_GROUND) { kk = 0.6; }
     let lo = select(select(0.015, 0.005, fineK), select(0.03, 0.06, cls == C_PAVE), cls == C_GROUND || cls == C_PAVE);
     var det = 1.25 * clamp((hp - lo) / select(0.2, 0.16, fineK), 0.0, 0.8) * kk * select(K.look.x, 1.0, cls == C_PAVE) * mix(0.55, 1.0, idk) * mix(1.0, 0.3, smoothstep(far * 0.3, far, D));
     det *= 1.0 - farW;
@@ -1319,7 +1438,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_PAVE) {
     // (soft and broken: the stills' slab joints are a breath of grey, not a ruled grid)
     let jb = smoothstep(0.3, 0.7, lodNoise(P + 3.1, fp * 14.0 * uK));
-    ink = max(ink, bitcast<f32>(Cc.z) * 0.13 * (0.4 + 0.6 * jb));
+    ink = max(ink, bitcast<f32>(Cc.z) * 0.32 * (0.4 + 0.6 * jb));
   }
   // the battered stone walls of the terraces: a pale wash, deeper toward the foot and in a few damp vertical streaks,
   // the courses only hinted

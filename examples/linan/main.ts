@@ -31,6 +31,16 @@ const TIMES = [
   { look: 5, zh: '月夜', en: 'Moonlit night' }, { look: 8, zh: '秋', en: 'Autumn' }, { look: 10, zh: '冬雪', en: 'Winter snow' },
 ];
 const NIGHT_LOOK = 5;
+/** linan's looks restyled toward the reference paintings the owner picked (Keith-CY/linan refs/ink01–10), over the
+ *  settings its stills were painted with: a bluer summer sky and more heaps of cloud, the sunset's lake pale with the
+ *  woods dark in it (not a dark wash), its woods veiled only high up, the bore's sky full of cumulus */
+const REF_INK: Record<number, Record<string, unknown>> = {
+  1: { bands: [[330, 210, 0.35, 48], [3700, 900, 0.95, 70], [9000, 4500, 0.9, 300]] },
+  3: { skyTint: [0.95, 0.55, 0.28, 0.42], clouds: 0.7 },
+  4: { water: 0.12, veil: [40, 90, 0.5], leaf: 0.8, haze: 700 },
+  6: { veil: [68, 100, 0.35], mist: [5, 34, 140, 0.4] },
+  9: { clouds: 0.75 },
+};
 
 const P = new URLSearchParams(location.search);
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -161,6 +171,7 @@ async function main(): Promise<void> {
   // every level-of-detail distance at 0.8 (a fifth fewer triangles where the woods are thick, as at 飞来峰, with no
   // difference the painting shows); ?lod= another scale
   engine.renderer.lodScale = Number(P.get('lod') ?? 0.8);
+  for (const L of scene.looks ?? []) if (REF_INK[L.id] && P.get('refink') !== '0') L.ink = { ...(L.ink ?? {}), ...REF_INK[L.id] };
   engine.setScene(scene);
 
   const vps = scene.viewpoints;

@@ -25,8 +25,8 @@ fn classLine(c: u32) -> array<f32, 5> {
   if (isArch(c)) { r = array<f32, 5>(0.8, 0.6, 0.22, 0.5, 1.0); }
   if (c == C_ROOF) { r[1] = 0.35; r[2] = 0.6; }   // hips and ridges only; the tile rows are left to the wash
   if (c == C_CITYFAR) { r[0] = 0.45; r[1] = 0.08; r[3] = 0.45; }
-  if (c == C_GROUND) { r = array<f32, 5>(0.12, 0.0, r[2], 1.0, 2.0); }
-  if (c == C_ROCK) { r = array<f32, 5>(0.55, 0.15, 0.75, 1.2, 3.0); }
+  if (c == C_GROUND) { r = array<f32, 5>(0.07, 0.0, r[2], 1.0, 2.0); }
+  if (c == C_ROCK) { r = array<f32, 5>(0.4, 0.15, 0.75, 1.2, 3.0); }
   if (c == C_FIGURE) { r = array<f32, 5>(0.9, 0.6, 0.12, 0.42, 4.0); }
   if (c == C_NICHE) { r = array<f32, 5>(0.8, 0.3, 0.5, 1.1, 3.0); }
   if (c == C_BARK) { r = array<f32, 5>(0.8, 0.1, 0.6, 1.1, r[4]); }
@@ -36,7 +36,7 @@ fn classLine(c: u32) -> array<f32, 5> {
   if (c == C_IVY) { r[0] = 0.3; r[3] = 0.45; r[4] = 2.0; }
   if (c == C_BLOOM) { r = array<f32, 5>(0.75, 0.5, 0.2, 0.4, 1.0); }
   if (c == C_PAVE) { r = array<f32, 5>(0.25, 0.0, r[2], 0.6, 1.0); }
-  if (c == C_LOTUS) { r[0] = 0.16; r[3] = 0.55; r[4] = 2.0; }
+  if (c == C_LOTUS) { r[0] = 0.07; r[3] = 0.55; r[4] = 2.0; }
   // the bore: broken lines (the painted bore of the ink-match look: hardly any, its foam melts into the paper)
   if (c == C_WAVE) { let m = K.look3.y > 0.5; r = array<f32, 5>(select(0.55, 0.22, m), 0.0, r[2], select(0.8, 0.5, m), 2.0); }
   return r;
@@ -94,7 +94,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
       if ((c == C_GROUND && cb == C_SMALL) || (c == C_SMALL && cb == C_GROUND)) { cl *= 0.15; }
       if (c == C_GROUND && isTree(cb)) { cl *= 0.4; }
       if (isArch(c) && isArch(cb)) { cl *= 0.8; }
-      if (cb == C_SKY) { cl = select(select(1.0, 0.7, c == C_ROCK), 0.35, fol || c == C_GROUND); }
+      // (a hill, a wood or a rock against the sky is a soft edge of wash, hardly a line: the references draw no contour)
+      if (cb == C_SKY) { cl = select(select(1.0, 0.45, c == C_ROCK), 0.15, fol || c == C_GROUND); }
     }
     // crease
     var cr = 0.0;
