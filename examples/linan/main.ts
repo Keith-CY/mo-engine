@@ -1,8 +1,8 @@
 // 临安 (linan.lapla.si) on the Mo engine: the city exported from Keith-CY/linan (?scene=, default scenes/linan-city/),
 // painted by painter 2, with linan's interface — the loading screen, the title, the places and the times of day in the
 // menu at the top right, walk / fly, the place's name after a jump, a short help line and the watermark.
-//   1 – 0  places · T  next time · M  the menu · F  walk / fly · W A S D, Shift, Space / C · drag or double-click to look
-//   · H  the HUD
+//   1 – 0  places · T  next time · M  the menu · F  walk / fly · W A S D or arrows, Shift, Space / E, C / Q · drag or
+//   double-click to look · H  the HUD; touch: a stick on the left, look on the right, up / down buttons while flying
 // ?vp= (or linan's ?at=) the first place (default 2) · ?fps=1 the frame rate · ?menu=1 the menu open · ?adaptive=1 the
 // render scale follows the frame rate under automation too · ?scale=, ?p2dbg=, ?hud=1 as the demo's
 import { Engine, loadMoScene, NoWebGPU, type Viewpoint } from '../../src/index';
@@ -46,6 +46,10 @@ class UI {
   private readonly hint: HTMLElement;
   private readonly placeEl: HTMLElement;
   private readonly detail: HTMLElement;
+  private readonly stickEl: HTMLElement;
+  readonly touch = matchMedia('(pointer: coarse)').matches;
+  /** up / down from the buttons shown while flying on a touch screen */
+  lift = 0;
   constructor(places: Viewpoint[], on: { place: (id: number) => void; time: (look: number) => void; mode: (m: 'walk' | 'fly') => void }) {
     const root = (this.root = document.createElement('div'));
     root.className = 'xui';
@@ -56,13 +60,26 @@ class UI {
         <div class="x-sec"><h3>名胜 <span>Places</span></h3><ol class="x-places"></ol></div>
         <div class="x-sec"><h3>时令 <span>Time and season</span></h3><div class="x-times"></div></div>
         <div class="x-sec"><div class="x-modes"><button data-m="walk">步行 <span>Walk</span></button><button data-m="fly">飞行 <span>Fly</span></button></div></div>
-        <p class="x-keys">WASD 行走 · 拖动环顾 · Shift 跑 · F 飞行 · 1–0 名胜 · T 时令 · M 菜单<br><span>WASD walk · drag to look · Shift run · F fly · 1–0 places · T time · M menu</span></p>
+        <p class="x-keys"></p>
       </div>
       <div class="x-hint"></div>
       <div class="x-place" aria-live="polite"></div>
+      <div class="x-fly"><button data-l="1" aria-label="Up">升</button><button data-l="-1" aria-label="Down">降</button></div>
+      <div class="x-stick" aria-hidden="true"><i></i></div>
       <div class="x-loading">细部载入中<span>Loading detail</span></div>`;
     document.body.appendChild(root);
+    root.classList.toggle('touch', this.touch);
     mountWatermark(root);
+    root.querySelector('.x-keys')!.innerHTML = this.touch
+      ? '左手推动行走，推到边缘为跑 · 右手拖动环顾<br><span>Left thumb to walk, push to the rim to run · drag on the right to look around</span>'
+      : 'WASD 行走 · 拖动环顾 · Shift 跑 · F 飞行 · 1–0 名胜 · T 时令 · M 菜单<br><span>WASD walk · drag to look · Shift run · F fly · 1–0 places · T time · M menu</span>';
+    for (const b of root.querySelectorAll<HTMLElement>('.x-fly button')) {
+      const l = Number(b.dataset.l);
+      b.addEventListener('touchstart', (e) => { e.preventDefault(); this.lift = l; }, { passive: false });
+      b.addEventListener('touchend', () => { this.lift = 0; });
+      b.addEventListener('touchcancel', () => { this.lift = 0; });
+    }
+    this.stickEl = root.querySelector('.x-stick')!;
     const ol = root.querySelector('.x-places')!;
     places.forEach((v, i) => {
       const p = PLACES[v.id] ?? { zh: v.name, en: '' };
@@ -96,13 +113,22 @@ class UI {
     if (open && document.pointerLockElement) document.exitPointerLock();
   }
   setLocked(locked: boolean): void {
-    this.hint.innerHTML = locked ? 'Esc 释放鼠标 <span>Esc to free the mouse</span>' : '拖动画面环顾 · 双击锁定鼠标 · WASD 行走 <span>Drag to look around · double-click to lock the mouse · WASD to walk</span>';
+    this.hint.innerHTML = this.touch ? '左侧拖动行走 · 右侧拖动环顾 <span>Drag left to walk · drag right to look</span>'
+      : locked ? 'Esc 释放鼠标 <span>Esc to free the mouse</span>' : '拖动画面环顾 · 双击锁定鼠标 · WASD 行走 <span>Drag to look around · double-click to lock the mouse · WASD to walk</span>';
+  }
+  /** the touch stick under the thumb (null: let go) */
+  stick(s: { x: number; y: number; dx: number; dy: number } | null): void {
+    this.stickEl.classList.toggle('on', !!s);
+    if (!s) { (this.stickEl.firstElementChild as HTMLElement).style.transform = ''; return; }
+    this.stickEl.style.left = `${s.x}px`; this.stickEl.style.top = `${s.y}px`;
+    (this.stickEl.firstElementChild as HTMLElement).style.transform = `translate(${s.dx}px, ${s.dy}px)`;
   }
   setState(s: { place: number; look: number; mode: string }): void {
     for (const b of this.root.querySelectorAll<HTMLElement>('[data-p]')) b.classList.toggle('on', Number(b.dataset.p) === s.place);
     for (const b of this.root.querySelectorAll<HTMLElement>('[data-t]')) b.classList.toggle('on', Number(b.dataset.t) === s.look);
     for (const b of this.root.querySelectorAll<HTMLElement>('[data-m]')) b.classList.toggle('on', b.dataset.m === s.mode);
     this.root.classList.toggle('night', s.look === NIGHT_LOOK);
+    this.root.classList.toggle('flying', s.mode === 'fly');
   }
   /** a place's name that fades in and out after a jump (where its painting leaves room for it) */
   announce(id: number): void {
@@ -171,12 +197,14 @@ async function main(): Promise<void> {
     else if (e.code === 'KeyF') requestAnimationFrame(() => ui.setState(state()));   // (the walker switches on the same key)
   });
   document.addEventListener('pointerlockchange', () => ui.setLocked(document.pointerLockElement === canvas));
+  engine.walker.onStick = (st) => ui.stick(st);
 
   const fpsOn = P.get('fps') === '1';
   if (fpsOn) hud.hidden = false;
   let last = 0;
   engine.onFrame((e) => {
     const now = performance.now();
+    e.walker.lift = ui.lift;
     // (the finer levels' note only when they take more than a moment: the CSS waits 0.6 s before showing it)
     ui.setStreaming(e.renderer.streaming > 0);
     if (now - last < 500 || hud.hidden) return;

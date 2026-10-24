@@ -18,7 +18,7 @@
   }
   html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; }
   body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-  canvas { display: block; width: 100vw; height: 100vh; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
   #hud { position: fixed; left: 12px; bottom: 10px; z-index: 11; font: 11px/1.5 ui-monospace, Menlo, monospace; color: var(--ink-2);
          background: var(--glass); padding: 4px 8px; border-radius: 2px; white-space: pre; pointer-events: none; }
 
@@ -102,6 +102,19 @@
                color: var(--ink-2); background: var(--glass); padding: 5px 12px; border-radius: 2px; opacity: 0; transition: opacity .3s var(--exit); white-space: nowrap; }
   .x-loading.on { opacity: 1; transition: opacity .3s var(--enter) .6s; }
   .x-loading span { display: inline !important; margin-left: 6px; }
+  /* touch: a stick under the left thumb, up / down while flying */
+  .x-fly { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(56px, calc(env(safe-area-inset-bottom) + 40px)); display: none;
+           flex-direction: column; gap: 10px; }
+  .xui.touch.flying .x-fly { display: flex; }
+  .x-fly button { width: 56px; height: 56px; border-radius: 50%; background: var(--glass) !important; border: 1px solid var(--line) !important;
+                  text-align: center !important; font-size: 18px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .x-fly button:active { transform: scale(.95); }
+  .x-stick { position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 1px solid rgba(29, 27, 24, .35);
+             background: rgba(238, 232, 219, .25); opacity: 0; transition: opacity .2s var(--exit); pointer-events: none; }
+  .x-stick.on { opacity: 1; transition: opacity .12s var(--enter); }
+  .x-stick i { position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; background: rgba(29, 27, 24, .55); }
+  .xui.touch .x-hint { animation: xhint 1.2s var(--exit) 6s forwards; }
+  @keyframes xhint { to { opacity: 0; } }
   .xui.night .x-title, .xui.night .x-place { color: #ece5d6; text-shadow: 0 0 10px rgba(20, 18, 16, .8), 0 0 3px rgba(20, 18, 16, .8); }
   .xui.night .x-title span, .xui.night .x-place span { color: rgba(236, 229, 214, .75); }
   @media (max-width: 560px) {

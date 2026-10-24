@@ -127,6 +127,7 @@ export class Engine {
     this.setStageAt(v.id);
     this.fitFov();
     this.walker.mode = this.modeAt(v.position);
+    this.walker.pin();
   }
 
   /** how an eye at `p` moves: walking where it stands near walkable ground, flying over water or high above it */
