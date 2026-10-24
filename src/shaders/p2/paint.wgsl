@@ -1269,6 +1269,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
           // one breaking crest per cell of a staggered world lattice: an arc of random width and offset, white on its
           // top edge, a dark trough in its lee (toward the viewer), the rest of the cell the churned grey
           let lev = l0 + f32(L);
+          let wl = select(tt, 1.0 - tt, L == 0);
+          if (wl < 0.01) { continue; }
           let Sv = exp2(lev); let Su = Sv * 3.6 * max(sinW2, 0.03);
           let g = vec2f(q2.x / Su, q2.y / Sv); let gi = floor(g);
           var c0 = 0.0; var t0 = 0.0;
@@ -1286,7 +1288,6 @@ fn fs(v: VOut) -> @location(0) vec4f {
               t0 = max(t0, smoothstep(-0.05, -0.18, dy) * (1.0 - smoothstep(-0.35, -0.6, dy)) * taper);
             }
           }
-          let wl = select(tt, 1.0 - tt, L == 0);
           crest += c0 * wl; trough += t0 * wl;
         }
         // the spent foam ahead: long streaks of white along the front on a paler grey, fewer dark troughs
