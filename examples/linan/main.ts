@@ -40,7 +40,7 @@ const REF_INK: Record<number, Record<string, unknown>> = {
   4: { water: 0.12, veil: [40, 90, 0.5], leaf: 0.8, haze: 700 },
   6: { veil: [68, 100, 0.35], mist: [5, 34, 140, 0.4], walls: 2 },
   7: { roofs: 1.35, patch: [60, 0.35] },
-  9: { clouds: 0.75 },
+  9: { clouds: 0.75, roofs: 0.72, detail: 0.65 },
 };
 
 const P = new URLSearchParams(location.search);
