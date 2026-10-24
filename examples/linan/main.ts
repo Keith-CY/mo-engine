@@ -3,13 +3,13 @@
 // menu at the top right, walk / fly, the place's name after a jump, a short help line and the watermark.
 //   1 – 0  places · T  next time · M  the menu · F  walk / fly · W A S D or arrows, Shift, Space / E, C / Q · drag or
 //   double-click to look · H  the HUD; touch: a stick on the left, look on the right, up / down buttons while flying
-// ?vp= (or linan's ?at=) the first place (default 2) · ?fps=1 the frame rate · ?menu=1 the menu open · ?adaptive=1 the
+// ?vp= (or linan's ?at=) the first place (default 2) · ?fps=1 the frame rate · ?menu=1 the menu open · ?ui=0 none · ?adaptive=1 the
 // render scale follows the frame rate under automation too · ?scale=, ?p2dbg=, ?hud=1 as the demo's
 import { Engine, loadMoScene, NoWebGPU, type Viewpoint } from '../../src/index';
 import { mountWatermark } from './watermark';
 
 declare global {
-  interface Window { __mo?: { engine: Engine; ready: boolean; error?: string } }
+  interface Window { __mo?: { engine: Engine; ready: boolean; error?: string; go?: (id: number) => void } }
 }
 
 /** the places (linan src/explore/ui.js PLACES): a viewpoint's names, and where its name stands after a jump */
@@ -183,6 +183,7 @@ async function main(): Promise<void> {
   go(place, false);
   if (P.get('look')) engine.setLook(Number(P.get('look')));
   if (P.get('menu') === '1') ui.toggle(true);
+  if (P.get('ui') === '0') ui.root.style.display = 'none';
 
   addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -221,7 +222,7 @@ async function main(): Promise<void> {
   loading(1, '研墨', 'Grinding the ink', '');
   $('loading').classList.add('gone');
   setTimeout(() => $('loading').remove(), 600);
-  window.__mo = { engine, ready: true };
+  window.__mo = { engine, ready: true, go: (id: number) => go(id, false) };
   console.log(`[linan] ready in ${(performance.now() - t0).toFixed(0)} ms`);
 }
 

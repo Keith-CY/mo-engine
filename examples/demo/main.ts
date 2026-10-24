@@ -3,7 +3,7 @@
 import { Engine, loadMoScene, syntheticTown, NoWebGPU } from '../../src/index';
 
 declare global {
-  interface Window { __mo?: { engine: Engine; ready: boolean; error?: string } }
+  interface Window { __mo?: { engine: Engine; ready: boolean; error?: string; go?: (id: number) => void } }
 }
 
 const P = new URLSearchParams(location.search);
