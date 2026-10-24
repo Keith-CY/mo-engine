@@ -94,7 +94,9 @@ draws what was seen last frame, then every instance in view is tested against a 
 far (src/shaders/hiz.wgsl: its bounding sphere's exact screen rectangle, read where it spans 2 × 2 texels) and what is
 seen but not yet drawn is drawn in a second pass into the same G-buffer. Only what lies wholly behind drawn surfaces is
 left out, so the picture is the same as drawing everything; at 飞来峰, at the foot of the cliff, two thirds of the view's
-triangles (the woods behind it) go. Vegetation is just instanced meshes with LOD groups (no camera-facing impostors:
+triangles (the woods behind it) go. The second pass costs about a millisecond where little is hidden, so every 30 frames
+the test counts the view's triangles it hides and draws by its findings only from 30 % hidden (off again below 20 %);
+switching changes no pixel. Vegetation is just instanced meshes with LOD groups (no camera-facing impostors:
 they turn with the view).
 
 ## 6. Terrain

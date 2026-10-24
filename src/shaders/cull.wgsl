@@ -6,12 +6,14 @@
 // appended to the list of every slot of its level (one slot per mesh of the level; a level may have none); one
 // indirect draw per slot draws the list.
 //
-// Occlusion, in two phases (F.occl.w = 1): `main` draws (pass 0) only the instances that were seen last frame; the
+// Occlusion, in two phases (F.occl.w bit 1): `main` draws (pass 0) only the instances that were seen last frame; the
 // depth they leave is reduced to a pyramid of its farthest depths (src/shaders/hiz.wgsl); `late` then tests every
 // instance in view against it — the ones hidden behind it are not drawn, the ones seen that phase 0 left out are
 // drawn now (pass 4, into the same G-buffer), and what each test found is what the next frame's phase 0 draws. The
 // test only ever leaves out what lies wholly behind what was drawn, so nothing appears a frame late (no pops), and it
-// depends on what is in view, not on the levels: a turn still changes no level.
+// depends on what is in view, not on the levels: a turn still changes no level. Every so often (F.occl.w bit 2) the test
+// also counts the triangles it hides and sees, whether or not it is drawing by them: the renderer keeps it on only
+// where it hides enough to pay for its second pass (renderer.ts).
 struct Batch {
   info: vec4u,   // first slot, levels (bits 0–7), the finest level casting shadows (8–15) and the coarsest (16–23), the distance beyond which
                  // it casts no shadow (f32 bits), instance count
@@ -32,6 +34,8 @@ struct Batch {
 @group(0) @binding(8) var<storage, read_write> seen: array<u32>;
 // the depth pyramid (late only): texel (x, y) of level k the farthest depth over the pixels [x, x + 1) · 2^(k+1)
 @group(0) @binding(9) var hiz: texture_2d<f32>;
+// counted when asked: the triangles hidden, the triangles seen
+@group(0) @binding(10) var<storage, read_write> occStats: array<atomic<u32>>;
 
 const NONE = 0xffu;
 
@@ -113,7 +117,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (fading) {
     if (lvl < levels) { emitLevel(B, lvl, 3u, i); }
     emitLevel(B, prev, 3u, i);
-  } else if (lvl < levels && (F.occl.w < 0.5 || seen[i] != 0u)) { emitLevel(B, lvl, 0u, i); }
+  } else if (lvl < levels && ((u32(F.occl.w) & 1u) == 0u || seen[i] != 0u)) { emitLevel(B, lvl, 0u, i); }
 }
 
 /** whether a sphere (eye-relative centre, radius) lies wholly behind the depth pyramid: its projection's bounding
@@ -149,6 +153,16 @@ fn hidden(c: vec3f, r: f32) -> bool {
   return near / (z - r) < d;
 }
 
+/** the triangles a level draws in the view */
+fn levelTris(B: Batch, level: u32) -> u32 {
+  let slots = u32(F.counts.x);
+  let sp = B.spans[min(level, 3u)];
+  let s0 = B.info.x + (sp & 0xffffu);
+  var n = 0u;
+  for (var m = 0u; m < (sp >> 16u); m++) { n += atomicLoad(&args[(s0 + m) * 5u]) / 3u; }
+  return n;
+}
+
 /** the occlusion test's second phase (one invocation per instance): after the first phase's G-buffer and the depth
  *  pyramid made from it */
 @compute @workgroup_size(64)
@@ -172,5 +186,7 @@ fn late(@builtin(global_invocation_id) gid: vec3u) {
   // (ground covers are lifted with distance, up to 0.4 mm a metre: the sphere grows with it)
   let vis = !hidden(c, r0 + 0.0005 * length(c));
   seen[i] = select(0u, 1u, vis);
-  if (vis && was == 0u && !fading) { emitLevel(B, st.level, 4u, i); }
+  let bits = u32(F.occl.w);
+  if ((bits & 2u) != 0u && st.level < levels) { atomicAdd(&occStats[select(0u, 1u, vis)], levelTris(B, st.level)); }
+  if ((bits & 1u) != 0u && vis && was == 0u && !fading) { emitLevel(B, st.level, 4u, i); }
 }

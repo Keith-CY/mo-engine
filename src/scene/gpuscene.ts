@@ -96,6 +96,8 @@ export class GpuScene {
   readonly lodState: GPUBuffer;
   /** per instance, 1 where the last occlusion test saw it (the next frame's first phase draws those) */
   readonly seen: GPUBuffer;
+  /** what an occlusion test found, when asked to count: the triangles it hid, the triangles it saw */
+  readonly occStats: GPUBuffer;
   /** indirect draw arguments, 5 words per slot; instanceCount zeroed each frame from `argsTemplate` */
   readonly args: GPUBuffer;
   readonly argsTemplate: GPUBuffer;
@@ -221,6 +223,7 @@ export class GpuScene {
     this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xffff), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 'mo lodState');
     // (the state word: no level (0xff) and none being left (0xff) — a 0 there would read as dissolving out of level 0)
     this.seen = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(1), GPUBufferUsage.STORAGE, 'mo seen');
+    this.occStats = device.createBuffer({ label: 'mo occlusion stats', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     // one set of draws per pass (the view, then each cascade)
     const args = new Uint32Array(this.slots.length * 5 * PASSES);
     for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => args.set([s.lazy ? 0 : s.indexCount, 0, s.firstIndex, s.baseVertex, 0], (p * this.slots.length + i) * 5));

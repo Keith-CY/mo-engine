@@ -104,8 +104,15 @@ export class Renderer {
   benchShadowsAlways = false;
   /** benchmarks: the G-buffer compiled without discard (foliage drawn whole); rebuildGbuffer() after a change */
   benchNoDiscard = false;
-  /** the frame-rate measures left out (bits, for A/B measurements): 1 the occlusion test (everything in view drawn) */
+  /** the frame-rate measures left out (bits, for A/B measurements): 1 the occlusion test (everything in view drawn),
+   *  2 its own judgement (the test drawn by everywhere, even where it hides little) */
   perfOff = 0;
+  /** the occlusion test draws by its findings only where they pay for its second pass: every 30 frames it counts the
+   *  view's triangles it hides, and is on from 30 % hidden, off again below 20 % (switching it changes no pixel) */
+  occlusionOn = true;
+  occlusionHidden = 0;
+  private occlRead?: { buf: GPUBuffer; busy: boolean };
+  private occlBits = 0;
   rebuildGbuffer(): void {
     this.pipes.gbuffer = this.device.createRenderPipeline(this.gbufferDesc(this.surfacesCode));
     this.pipes.gbufferOpaque = this.device.createRenderPipeline(this.gbufferDesc(this.surfacesCode, true));
@@ -169,6 +176,7 @@ export class Renderer {
       ...[1, 2, 3, 4].map((binding) => ({ binding, visibility: cs, buffer: st('read-only-storage') })),
       ...[5, 6, 7, 8].map((binding) => ({ binding, visibility: cs, buffer: st('storage') })),
       { binding: 9, visibility: cs, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 10, visibility: cs, buffer: st('storage') },
     ] });
     const hizFirst = d.createBindGroupLayout({ label: 'mo hiz first layout', entries: [
       { binding: 1, visibility: cs, storageTexture: { access: 'write-only', format: 'r32float' } },
@@ -492,7 +500,7 @@ export class Renderer {
       { binding: 2, resource: { buffer: s.batchOf } }, { binding: 3, resource: { buffer: s.batches } },
       { binding: 4, resource: { buffer: s.slotBase } }, { binding: 5, resource: { buffer: s.lodState } },
       { binding: 6, resource: { buffer: s.args } }, { binding: 7, resource: { buffer: s.visible } },
-      { binding: 8, resource: { buffer: s.seen } }, { binding: 9, resource: t.hiz.createView() },
+      { binding: 8, resource: { buffer: s.seen } }, { binding: 9, resource: t.hiz.createView() }, { binding: 10, resource: { buffer: s.occStats } },
     ] });
   }
 
@@ -587,7 +595,7 @@ export class Renderer {
     f.set([...(L.veil ?? [0, 0, 0]), L.rock ?? 1], 272);
     f.set(this.fieldInfo, 276);
     const hz = this.targets?.hiz;
-    f.set([hz?.width ?? 1, hz?.height ?? 1, hz?.mipLevelCount ?? 1, this.occlusion ? 1 : 0], 292);
+    f.set([hz?.width ?? 1, hz?.height ?? 1, hz?.mipLevelCount ?? 1, this.occlBits], 292);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.unjittered.set(unjittered);
     this.prevViewProj.set(unjittered);
@@ -641,7 +649,11 @@ export class Renderer {
   render(cam: Camera, timeS: number, capture = false): void {
     const d = this.device;
     const t = this.ensureTargets(cam.width, cam.height);
-    const occl = this.occlusion;
+    // (the occlusion test: drawn by (bit 1) where it pays or when held on; counted (bit 2) every 30 frames)
+    const allowed = this.occlusion, held = !!(this.perfOff & 2);
+    const occl = allowed && (held || this.occlusionOn);
+    const count = allowed && !held && this.frameNo % 30 === 0 && !(this.occlRead?.busy);
+    this.occlBits = (occl ? 1 : 0) | (count ? 2 : 0);
     this.writeFrame(cam, timeS);
     const enc = d.createCommandEncoder({ label: 'mo frame' });
     const s = this.scene;
@@ -655,6 +667,7 @@ export class Renderer {
     };
     if (s && this.sceneBG && !this.benchSkip.has('cull')) {
       enc.copyBufferToBuffer(s.argsTemplate, 0, s.args, 0, s.slots.length * 20 * PASSES);
+      if (count) enc.clearBuffer(s.occStats);
       const cp = enc.beginComputePass({ label: 'mo cull', timestampWrites: tw('cull') });
       cp.setPipeline(this.pipes.cull);
       cp.setBindGroup(0, this.cullBindGroup(s, t));
@@ -690,7 +703,8 @@ export class Renderer {
     g.end();
     // the occlusion test's second phase: the depth pyramid of what the first drew, every instance in view tested
     // against it, and what it finds seen that the first phase left out drawn into the same G-buffer
-    if (s && this.sceneBG && this.drawBG && occl && !this.benchSkip.has('gbuffer')) {
+    const counting = !!(s && this.sceneBG && this.drawBG && count && !this.benchSkip.has('gbuffer'));
+    if (s && this.sceneBG && this.drawBG && (occl || counting) && !this.benchSkip.has('gbuffer')) {
       const hp = enc.beginComputePass({ label: 'mo hiz', timestampWrites: tw('hiz') });
       t.hizBGs.forEach((bg, k) => {
         hp.setPipeline(k ? this.pipes.hizNext : this.pipes.hizFirst);
@@ -702,6 +716,9 @@ export class Renderer {
       hp.setBindGroup(0, this.cullBindGroup(s, t));
       hp.dispatchWorkgroups(Math.ceil(s.instanceCount / 64));
       hp.end();
+      if (counting) enc.copyBufferToBuffer(s.occStats, 0, (this.occlRead ??= { buf: d.createBuffer({ label: 'mo occlusion stats read', size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false }).buf, 0, 16);
+    }
+    if (s && this.sceneBG && this.drawBG && occl && !this.benchSkip.has('gbuffer')) {
       const g2 = enc.beginRenderPass({
         label: 'mo gbuffer late', timestampWrites: tw('gbuffer2'),
         colorAttachments: [t.a, t.b, t.c].map((x) => ({ view: x.createView(), loadOp: 'load' as const, storeOp: 'store' as const })),
@@ -729,6 +746,20 @@ export class Renderer {
       enc.copyBufferToBuffer(T.resolve, 0, T.read, 0, names.length * 16);
     }
     d.queue.submit([enc.finish()]);
+    // (what the count found decides whether the test draws by its findings from now on)
+    if (counting && this.occlRead) {
+      const R = this.occlRead;
+      R.busy = true;
+      R.buf.mapAsync(GPUMapMode.READ).then(() => {
+        const [hid, saw] = new Uint32Array(R.buf.getMappedRange(0, 8));
+        R.buf.unmap();
+        R.busy = false;
+        if (hid + saw > 0) {
+          this.occlusionHidden = hid / (hid + saw);
+          this.occlusionOn = this.occlusionHidden > (this.occlusionOn ? 0.2 : 0.3);
+        }
+      }).catch(() => { R.busy = false; });
+    }
     if (T && names.length) {
       T.busy = true;
       T.read.mapAsync(GPUMapMode.READ).then(() => {
