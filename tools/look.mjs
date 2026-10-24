@@ -2,6 +2,8 @@
 // with reference paintings quickly. Each view is settled (finer levels fetched) and held still ~1.5 s before its shot.
 //   node tools/look.mjs [--vps 1,2,…] [--out out/look] [--w 1664 --h 928] [--q "scene=…"] [--refs dir]
 //   --refs: pairs (reference left, Mo right) from dir/inkNN.jpg into <out>/pairs/pN.jpg
+//   --walk "vp:metres:turn°,…": instead of the viewpoints, an eye that went to a place, walked that far ahead (on the
+//   ground, eye 1.6 m) and turned (walk-<vp>-<m>-<turn>.png)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -33,7 +35,24 @@ try {
   const err = await page.evaluate(() => window.__mo.error || null);
   if (err) throw new Error(err);
   console.log(`[look] loaded in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
-  for (const vp of vps) {
+  const walks = (args.walk || '').split(',').filter(Boolean).map((w) => w.split(':').map(Number));
+  for (const [vp, m, turn] of walks) {
+    await page.evaluate(([id, m, turn]) => {
+      const e = window.__mo.engine; window.__mo.go(id);
+      const c = e.camera, p = c.position;
+      const nx = p[0] + Math.sin(c.yaw) * m, nz = p[2] - Math.cos(c.yaw) * m;
+      const g = e.walker.ground(nx, nz);
+      p[0] = nx; p[2] = nz; if (Number.isFinite(g)) p[1] = g + 1.6;
+      c.yaw += (turn * Math.PI) / 180; c.pitch = 0;
+      e.walker.mode = 'walk';
+    }, [vp, m, turn || 0]);
+    await page.evaluate(() => window.__mo.engine.settle());
+    await new Promise((r) => setTimeout(r, Number(args.wait || 1.5) * 1000));
+    const file = path.join(OUT, `walk-${vp}-${m}-${turn || 0}.png`);
+    await page.screenshot({ path: file });
+    console.log(`[look] ${path.relative(ROOT, file)}`);
+  }
+  for (const vp of walks.length ? [] : vps) {
     await page.evaluate((id) => window.__mo.go(id), vp);
     await page.evaluate(() => window.__mo.engine.settle());
     await new Promise((r) => setTimeout(r, Number(args.wait || 1.5) * 1000));

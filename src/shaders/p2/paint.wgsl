@@ -245,23 +245,26 @@ fn boughs(p: vec2f, sc: f32, pxu: f32, seed: f32, willow: bool) -> vec2f {
   let n = select(6, 5, willow);
   for (var k = 0; k < n; k++) {
     let h = h43(vec3i(i32(seed), k, 913));
+    let h2 = h43(vec3i(i32(seed), k, 917));
     let side = select(-1.0, 1.0, (f32(k) + h.x * 0.8) % 2.0 >= 1.0);
-    var a = fork + vec2f(side * 0.15 * sc * h.y, -0.4 * sc * h.z);
-    var m = vec2f(0.0); var b = vec2f(0.0);
+    // three bends: out of the fork, up and over, and (a willow's) down at the tip; each joint kinked a little
+    let a = fork + vec2f(side * 0.15 * sc * h.y, -0.4 * sc * h.z);
+    var m1 = vec2f(0.0); var m2 = vec2f(0.0); var b = vec2f(0.0);
     if (willow) {
-      m = fork + vec2f(side * (0.7 + 1.3 * h.y), 1.4 + 1.8 * h.z) * sc;
-      b = m + vec2f(side * (0.9 + 1.0 * h.w), 0.3 - 1.4 * h.x) * sc;
+      m1 = fork + vec2f(side * (0.35 + 0.6 * h.y), 0.9 + 1.0 * h.z) * sc;
+      m2 = m1 + vec2f(side * (0.5 + 0.7 * h.w), 0.6 + 0.9 * h2.x - 0.2) * sc;
+      b = m2 + vec2f(side * (0.4 + 0.6 * h2.y), -0.4 - 1.0 * h2.z) * sc;
     } else {
-      m = fork + vec2f(side * (0.3 + 0.8 * h.y), 0.7 + 0.8 * h.z) * sc;
-      b = m + vec2f(side * (0.4 + 0.9 * h.w), 0.5 + 0.9 * h.x) * sc;
+      m1 = fork + vec2f(side * (0.2 + 0.45 * h.y), 0.45 + 0.5 * h.z) * sc;
+      m2 = m1 + vec2f(side * (0.25 + 0.5 * h.w) + (h2.x - 0.5) * 0.3, 0.35 + 0.5 * h2.y) * sc;
+      b = m2 + vec2f(side * (0.2 + 0.5 * h2.z) - (h2.w - 0.5) * 0.4, 0.3 + 0.5 * h.x) * sc;
     }
-    let w = max(pxu * 0.55, select(0.07, 0.1, willow) * sc);
-    let wt = max(pxu * 0.4, 0.015 * sc);
-    let c1 = segCov(p, a, m, w, w * 0.6, pxu * 0.8);
-    let c2 = segCov(p, m, b, w * 0.6, wt, pxu * 0.8);
-    cov = max(cov, max(c1, c2) * (0.75 + 0.25 * h.w));
-    // (distance to the limb's outer half, where the twigs and blossom are)
-    let pb = p - m; let bb = b - m;
+    let w = max(pxu * 0.5, select(0.045, 0.06, willow) * sc);
+    let w1 = max(pxu * 0.45, w * 0.6); let w2 = max(pxu * 0.4, w * 0.35); let wt = max(pxu * 0.35, 0.01 * sc);
+    let c = max(max(segCov(p, a, m1, w, w1, pxu * 0.8), segCov(p, m1, m2, w1, w2, pxu * 0.8)), segCov(p, m2, b, w2, wt, pxu * 0.8));
+    cov = max(cov, c * (0.75 + 0.25 * h.w));
+    // (distance to the limb's outer part, where the twigs and blossom are)
+    let pb = p - m1; let bb = b - m1;
     let hb = clamp(dot(pb, bb) / max(dot(bb, bb), 1e-6), 0.0, 1.0);
     dmin = min(dmin, length(pb - bb * hb));
   }
@@ -939,7 +942,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let p2 = smoothstep(0.35, 0.75, p2n);
     let patches = smoothstep(0.3, 0.8, patchN);
     let nearG = 1.0 - smoothstep(far * 0.25, far * 0.7, Ds);
-    let gw = (0.1 + 0.14 * patches + 0.08 * p2 + 0.06 * st * patches + 0.12 * baseK + 0.08 * shade) * mix(0.6, 1.0, idk) * nearG * min(K.look2.y, 2.5);
+    // (even, as the references' banks: the patches only a little deeper, never pale holes)
+    let gw = (0.16 + 0.07 * patches + 0.05 * p2 + 0.06 * st * patches + 0.12 * baseK + 0.08 * shade) * mix(0.6, 1.0, idk) * nearG * min(K.look2.y, 2.5);
     w1 = max(w1, gw * inkGain);
   }
   // snow scenes: the water and the bark are inked so the snow can be left as paper (烘托)
@@ -1194,7 +1198,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
         let sc = scaleOf(Cc.y);
         let bg = boughs(lp, sc, fpo, seed, false);
         let near = 1.0 - smoothstep(0.25 * sc, 0.8 * sc, bg.y);
-        let fl = leafDots(lp, max(fpo * 5.0, 0.12 * sc), fpo, 0.25 + 0.6 * near, seed, 0.0, 1.0) * (0.3 + 0.7 * near);
+        let fl = leafDots(lp, max(fpo * 4.0, 0.07 * sc), fpo, 0.25 + 0.6 * near, seed, 0.0, 1.0) * (0.3 + 0.7 * near);
         petal = fl * (1.0 - bg.x);
         nearL = max(bg.x * 0.9, fl * 0.12);
       }
@@ -1388,7 +1392,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // 纯水墨 with a touch of colour: pink blossom and lotus, red maple, gold ginkgo, the sky's own warmth
   if (K.look.w > 0.0) {
     var acc = vec3f(0.0);
-    if (cls == C_BLOSSOM) { acc = (P_ZHU * 0.42 + P_ZHE * 0.04) * select(1.0, 0.05 + 1.4 * petal, match_); }
+    if (cls == C_BLOSSOM) { acc = (P_ZHU * 0.42 + P_ZHE * 0.04) * select(1.0, 0.05 + 0.85 * petal, match_); }
     else if (cls == C_WILLOW && match_) { acc = (P_TENG * 0.35 + P_ZHE * 0.3) * thread; }
     else if (cls == C_MAPLE) { acc = P_ZHU * (1.0 + 0.4 * lit) + P_ZHE * 0.3; }
     else if (cls == C_GINKGO) { acc = P_TENG * 0.9 + P_ZHE * 0.35; }
