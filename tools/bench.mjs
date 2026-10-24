@@ -100,11 +100,15 @@ try {
       pages = [];
       for (const s of servers) pages.push(await open(s, vp));
     }
-    for (const p of pages) await settle(p, vp);
+    for (const p of pages) { await p.bringToFront(); await settle(p, vp); }
     const out = {};
     for (let k = 0; k < ROUNDS; k++) {
       for (const c of configs) {
-        for (let pi = 0; pi < pages.length; pi++) (out[pi ? `${c}@base` : c] ??= []).push(await timeConfig(pages[pi], c));
+        // (the page timed is brought to the front: a hidden page's frames wait)
+        for (let pi = 0; pi < pages.length; pi++) {
+          if (pages.length > 1) await pages[pi].bringToFront();
+          (out[pi ? `${c}@base` : c] ??= []).push(await timeConfig(pages[pi], c));
+        }
       }
     }
     // (the least of the rounds' means and their median; and, steadiest on a GPU another process keeps busy, each
