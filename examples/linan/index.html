@@ -106,6 +106,7 @@
   .x-fly { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(56px, calc(env(safe-area-inset-bottom) + 40px)); display: none;
            flex-direction: column; gap: 10px; }
   .xui.touch.flying .x-fly { display: flex; }
+  .xui.open .x-fly { display: none !important; }
   .x-fly button { width: 56px; height: 56px; border-radius: 50%; background: var(--glass) !important; border: 1px solid var(--line) !important;
                   text-align: center !important; font-size: 18px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
   .x-fly button:active { transform: scale(.95); }
