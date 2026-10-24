@@ -22,9 +22,10 @@ fn classLine(c: u32) -> array<f32, 5> {
   // contours belong to architecture (界画) and a few key forms; trees, hills, grass and water are described by
   // wash, 皴 and dots, so their outlines are faint and broken, and only rock keeps a broken silhouette
   var r = array<f32, 5>(1.0, 0.0, 0.3, 1.2, 0.0);
-  if (isArch(c)) { r = array<f32, 5>(0.8, 0.6, 0.22, 0.5, 1.0); }
+  // (the references' 界画 lines are fine: the buildings are modelled in tone, the lines only sharpen them)
+  if (isArch(c)) { r = array<f32, 5>(0.72, 0.5, 0.22, 0.4, 1.0); }
   if (c == C_ROOF) { r[1] = 0.35; r[2] = 0.6; }   // hips and ridges only; the tile rows are left to the wash
-  if (c == C_CITYFAR) { r[0] = 0.45; r[1] = 0.08; r[3] = 0.45; }
+  if (c == C_CITYFAR) { r[0] = 0.32; r[1] = 0.08; r[3] = 0.4; }
   if (c == C_GROUND) { r = array<f32, 5>(0.07, 0.0, r[2], 1.0, 2.0); }
   if (c == C_ROCK) { r = array<f32, 5>(0.4, 0.15, 0.75, 1.2, 3.0); }
   if (c == C_FIGURE) { r = array<f32, 5>(0.9, 0.6, 0.12, 0.42, 4.0); }

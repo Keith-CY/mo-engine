@@ -779,14 +779,26 @@ fn fs(v: VOut) -> @location(0) vec4f {
       if (cls == C_PINE) { crownW = crownW * 1.12 + 0.06; }
       if (cls == C_MAPLE || cls == C_GINKGO) { crownW *= 0.62; }
       // (the lit gaps: small dabs of paper on the side toward the light)
-      let gap = leafDots(lp + vec2f(17.3, 5.1), max(fpo * 6.0, 0.35), fpo, 0.55 * (1.0 - shC) * clumpBody, hs * 991.0 + 7.0, 0.0, 1.3);
+      // (cheap: two lookups of noise, thresholded into small blobs by the light)
+      let gq = (lp + vec2f(17.3, 5.1)) / max(fpo * 5.0, 0.3) + hs * 53.0;
+      let gap = smoothstep(0.66, 0.74, vnoise2(gq) * 0.75 + vnoise2(gq * 2.7 + 3.3) * 0.25 + 0.22 * (1.0 - shC) * clumpBody - 0.12);
       crownW *= 1.0 - 0.55 * gap;
       w0 = crownW;
     }
   }
   if (cls == C_IVY && !night) { w0 = 0.42 + 0.25 * shade; }
   if (cls == C_BARK && !night && match_) { w0 = max(w0, 0.55 + 0.3 * shade); }
-  if (cls == C_PAVE && !night) { w0 = 0.11 + 0.08 * shade; }
+  // buildings modelled in tone as the references' 界画 are, not white fills inside outlines: walls and timber grey
+  // in shade, the undersides of the eaves and the brackets dark
+  if (match_ && !night && (cls == C_WALL || cls == C_WOOD || cls == C_STONE || cls == C_DARK) && hasN) {
+    let eaveU = smoothstep(-0.15, -0.6, Nw.y);
+    w0 = max(w0, select(0.06, 0.12, cls == C_WOOD || cls == C_DARK) + 0.3 * shade + 0.45 * eaveU);
+  }
+  // a slab path as the references paint it: each slab its own flat grey (the G-buffer's slab id), the joints dark
+  if (cls == C_PAVE && !night) {
+    let blk = bitcast<f32>(Cc.w);
+    w0 = 0.12 + 0.08 * shade + select(0.0, 0.1 * (blk - 0.5), blk >= 0.0 && match_);
+  }
   if (cls == C_BLOOM && !night) { w0 = 0.01 + 0.06 * shade; }
   if (cls == C_LOTUS && !night) { w0 = 0.5 + 0.3 * shade + 0.15 * smoothstep(0.4, 0.95, 1.0 - abs(Nw.y)); }
   // roofs: each plane one flat wash (界画), set by the painter's light, not by the cast shadows
@@ -1000,7 +1012,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let under = smoothstep(0.62, 0.5, vnoise2(cu) * 0.55 + vnoise2(cu * vec2f(2.6, 1.8) + 4.0) * 0.3 + 0.075);
     w1 = max(w1, K.look6.w * band * (0.1 + 0.12 * under) * (1.0 - 0.85 * clamp(glowW * 1.4, 0.0, 1.0)));
   }
-  if (isArch(cls)) { w1 = min(w1, select(0.34, select(0.42, 0.7, K.mpatch.y > 0.0) * K.look.z, cls == C_ROOF)); }
+  if (isArch(cls)) { w1 = min(w1, select(select(0.34, 0.6, match_), select(0.42, 0.7, K.mpatch.y > 0.0) * K.look.z, cls == C_ROOF)); }
   // a far building (a pagoda across the lake) a dark silhouette in the haze
   if (match_ && isArch(cls) && !night) { w1 = max(w1, 0.36 * smoothstep(ridgeFrom * 0.8, ridgeFrom * 1.6, D) * inkGain); }
   // night: an ink night, dark and flat; the moon a clean disc of paper in a soft lighter halo; the lake a wash a
@@ -1073,7 +1085,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // a sky wash (and a roof plane) is laid flat, in one go
   if (cls == C_SKY || cls == C_LOTUS || cls == C_GLOW || (night && (isArch(cls) || isLand(cls) || isFol(cls)))
       || (cls == C_WATER && (night || paperLift > 0.5 || K.look5.x > 0.0 || K.waterRefl.y > 0.0)) || cls == C_ROOF || cls == C_CITYFAR
-      || ((cls == C_ROCK || cls == C_NICHE) && nearR > 0.5)) { wash = w1; }
+      || ((cls == C_ROCK || cls == C_NICHE) && nearR > 0.5) || (cls == C_PAVE && match_)) { wash = w1; }
 
   // far ranges: dark at the ridge, fading downward into mist (留白)
   let farK = smoothstep(ridgeFrom * 0.7, ridgeFrom * 1.4, D) * select(0.0, 1.0, uRidge > 0.0 && cls != C_SKY && cls != C_WATER);
@@ -1438,7 +1450,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_PAVE) {
     // (soft and broken: the stills' slab joints are a breath of grey, not a ruled grid)
     let jb = smoothstep(0.3, 0.7, lodNoise(P + 3.1, fp * 14.0 * uK));
-    ink = max(ink, bitcast<f32>(Cc.z) * 0.32 * (0.4 + 0.6 * jb));
+    ink = max(ink, bitcast<f32>(Cc.z) * select(0.32, 0.5, match_) * (0.4 + 0.6 * jb));
   }
   // the battered stone walls of the terraces: a pale wash, deeper toward the foot and in a few damp vertical streaks,
   // the courses only hinted
