@@ -563,11 +563,12 @@ fn boreHash(n: i32) -> f32 {
   x = (x ^ (x >> 15u)) * 2246822519u; x = (x ^ (x >> 13u)) * 3266489917u;
   return f32(x ^ (x >> 16u)) / 4294967296.0;
 }
-/** the curl of the crest at al m along the front: 0 where it spills .. 1 a full curl */
+/** the curl of the crest at al m along the front (0 spilling .. 1 a full curl), as linan's tide.js inkCurl: one
+ *  continuous rolling wall, never below 0.72, swelling gently per stretch (a raised cosine sized by its hash) */
 fn boreCurl(al: f32) -> f32 {
   let P = max(K.bore1.z, 1.0); let fi = floor(al / P); let i = i32(fi);
-  let u = al / P - fi; let peak = 0.35 + 0.3 * boreHash(i * 7 + 3);
-  return pow(max(0.0, 1.0 - abs(u - peak) / select(1.0 - peak, peak, u < peak)), 1.4) * (0.55 + 0.45 * boreHash(i * 13 + 5));
+  let u = al / P - fi;
+  return 0.72 + 0.28 * (0.5 - 0.5 * cos(u * 6.2831853)) * (0.55 + 0.45 * boreHash(i * 13 + 5));
 }
 /** the bore's normal on the ground, turned toward the look's own camera */
 fn boreN() -> vec2f {
@@ -581,7 +582,7 @@ fn boreFrame(P: vec3f) -> vec4f {
   let a = K.bore0.xy; let b = K.bore0.zw; let len = max(length(b - a), 1.0);
   let t2 = (b - a) / len;
   let al = dot(P.xz - a, t2); let c = boreCurl(al);
-  let H = mix(K.bore1.x, K.bore1.y, smoothstep(0.3, 1.0, al / len)) * (0.78 + 0.22 * c) * (0.94 + 0.06 * sin(al / 53.0 + 0.7));
+  let H = mix(K.bore1.x, K.bore1.y, smoothstep(0.3, 1.0, al / len)) * (0.9 + 0.1 * c) * (0.94 + 0.06 * sin(al / 53.0 + 0.7));
   return vec4f(al, dot(P.xz - a, boreN()), H, c);
 }
 
