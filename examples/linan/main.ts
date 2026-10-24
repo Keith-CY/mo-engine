@@ -159,7 +159,8 @@ async function main(): Promise<void> {
   const t0 = performance.now();
   loading(0.02, '展卷', 'Unrolling the scroll', '');
   const engine = await Engine.create({ canvas, pixelRatio: Number(P.get('dpr')) || undefined });
-  const src = P.get('scene') ?? 'scenes/linan-city/';
+  // (the site names its scene folder by the files' hash: <meta name="mo-scene">)
+  const src = P.get('scene') ?? document.querySelector<HTMLMetaElement>('meta[name="mo-scene"]')?.content ?? 'scenes/linan-city/';
   const scene = await loadMoScene(src, {
     onProgress: (done, total, bytes) => loading(0.05 + 0.85 * (done / total), '展卷', 'Unrolling the scroll', `${(bytes / 1048576).toFixed(0)} MB`),
   });
