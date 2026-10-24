@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>临安 · Hangzhou</title>
+<meta name="description" content="Southern Song Hangzhou, walkable and painted as Chinese ink, drawn entirely in code (the Mo engine, WebGPU).">
+<link rel="icon" href="data:,">
+<style>
+  /* the interface of linan.lapla.si (Keith-CY/linan index.html and src/explore/ui.js), over the Mo engine */
+  :root {
+    --paper: #eee8db; --ink: #1d1b18; --ink-2: #4a463f; --ink-3: #807a6f; --seal: #a8321f;
+    --glass: rgba(238, 232, 219, 0.84); --line: rgba(29, 27, 24, 0.16);
+    --serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", serif;
+    --latin: "Iowan Old Style", "Palatino", "Georgia", serif;
+    /* motion: arrivals front-loaded, exits accelerating and 0.6× as long */
+    --enter: cubic-bezier(0.32, 0.72, 0, 1); --exit: cubic-bezier(0.5, 0, 0.75, 0);
+  }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; }
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 12px; bottom: 10px; z-index: 11; font: 11px/1.5 ui-monospace, Menlo, monospace; color: var(--ink-2);
+         background: var(--glass); padding: 4px 8px; border-radius: 2px; white-space: pre; pointer-events: none; }
+
+  /* ---------------------------------------------------------------- loading */
+  #loading { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: var(--paper); color: var(--ink);
+             font-family: var(--serif); transition: opacity .48s var(--exit); }
+  #loading.gone { opacity: 0; pointer-events: none; }
+  #loading .ld { width: min(420px, calc(100vw - 64px)); }
+  #loading h1 { margin: 0; font-weight: 400; font-size: clamp(54px, 13vw, 92px); letter-spacing: .18em; line-height: 1; }
+  #loading .sub { margin-top: 16px; font-size: 15px; letter-spacing: .3em; color: var(--ink-2); }
+  #loading .sub span, #loading .step span, .xui span { display: block; font-family: var(--latin); letter-spacing: .02em; font-size: .78em; color: var(--ink-3); }
+  #loading .sub span { letter-spacing: .04em; margin-top: 5px; font-size: 13px; }
+  #loading .seal { display: inline-block; margin-left: 6px; vertical-align: 22%; width: 22px; height: 22px; background: var(--seal); color: #f4ead8;
+                   font-size: 13px; font-style: normal; line-height: 22px; text-align: center; letter-spacing: 0; border-radius: 2px; }
+  #loading .track { margin-top: 44px; height: 2px; background: var(--line); overflow: hidden; }
+  #loading #ld-bar { height: 100%; background: var(--ink); transform: scaleX(.02); transform-origin: left; transition: transform .5s var(--enter); }
+  #loading .row { display: flex; justify-content: space-between; align-items: flex-start; margin-top: 14px; }
+  #loading .step { font-size: 15px; letter-spacing: .12em; min-height: 40px; }
+  #loading .step span { margin-top: 3px; font-size: 12.5px; }
+  #loading #ld-pc { font-family: var(--latin); font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: right; }
+  #loading .note { margin-top: 30px; font-size: 12.5px; line-height: 1.7; color: var(--ink-3); font-family: var(--latin); }
+  #loading.error .track, #loading.error .row { display: none; }
+
+  /* ---------------------------------------------------------------- the interface */
+  .xui { position: fixed; inset: 0; pointer-events: none; z-index: 10; color: var(--ink); font-family: var(--serif); }
+  .xui button { pointer-events: auto; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; text-align: left; padding: 0; }
+  .xui button:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+  .x-title { position: absolute; left: max(22px, env(safe-area-inset-left)); top: max(18px, env(safe-area-inset-top));
+             text-shadow: 0 0 10px var(--paper), 0 0 3px var(--paper); }
+  .x-title b { font-weight: 400; font-size: 26px; letter-spacing: .22em; }
+  .x-title span { font-size: 12px; margin-top: 2px; color: var(--ink-2); }
+  .x-menu-btn { position: absolute; right: max(18px, env(safe-area-inset-right)); top: max(16px, env(safe-area-inset-top)); background: var(--glass) !important;
+                border: 1px solid var(--line) !important; border-radius: 2px; padding: 9px 14px !important; font-size: 17px; letter-spacing: .1em;
+                backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); min-height: 44px; transition: transform .12s var(--enter); }
+  .x-menu-btn:active { transform: scale(.97); }
+  .x-menu-btn span { display: inline !important; margin-left: 6px; }
+  .x-panel { position: absolute; right: max(18px, env(safe-area-inset-right)); top: calc(max(16px, env(safe-area-inset-top)) + 56px); width: 330px;
+             max-height: calc(100vh - 110px); overflow: auto; pointer-events: auto; background: var(--glass); border: 1px solid var(--line);
+             border-radius: 2px; padding: 16px 18px 14px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-sizing: border-box;
+             transform-origin: top right; opacity: 0; transform: translateY(-6px); visibility: hidden;
+             transition: opacity .19s var(--exit), transform .19s var(--exit), visibility 0s .19s; }
+  .xui.open .x-panel { opacity: 1; transform: none; visibility: visible; transition: opacity .32s var(--enter), transform .32s var(--enter), visibility 0s; }
+  /* the places arrive one after another, 25 ms apart (the cascade ends within 0.5 s) */
+  .x-places li { opacity: 0; transform: translateY(4px); transition: opacity .12s var(--exit), transform .12s var(--exit); }
+  .xui.open .x-places li { opacity: 1; transform: none; transition: opacity .3s var(--enter) calc(var(--i) * 25ms + 40ms), transform .3s var(--enter) calc(var(--i) * 25ms + 40ms); }
+  .x-sec + .x-sec { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .x-sec h3 { margin: 0 0 8px; font-weight: 400; font-size: 13px; letter-spacing: .2em; color: var(--ink-2); }
+  .x-sec h3 span { display: inline !important; margin-left: 6px; letter-spacing: .04em; }
+  .x-places { list-style: none; margin: 0; padding: 0; }
+  .x-places button { display: grid; grid-template-columns: 22px 1fr; column-gap: 8px; width: 100%; padding: 5px 4px !important; font-size: 16px;
+                     letter-spacing: .08em; border-radius: 2px; min-height: 44px; transition: background-color .15s var(--enter); }
+  .x-places button em { font-style: normal; font-family: var(--latin); font-size: 12px; color: var(--ink-3); grid-row: span 2; padding-top: 3px; }
+  .x-places button span { grid-column: 2; font-size: 11.5px; }
+  .x-places button:hover, .x-times button:hover, .x-modes button:hover { background: rgba(29, 27, 24, .06); }
+  .x-places button.on { color: var(--seal); }
+  .x-times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .x-times button, .x-modes button { padding: 7px 8px !important; font-size: 15px; letter-spacing: .1em; border: 1px solid transparent !important; border-radius: 2px; min-height: 44px;
+                                     transition: background-color .15s var(--enter), border-color .15s var(--enter); }
+  .x-times button span, .x-modes button span { font-size: 11px; }
+  .x-times button.on, .x-modes button.on { border-color: var(--ink) !important; }
+  .x-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
+  .x-keys { margin: 14px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+  .x-keys span { font-size: 11.5px; }
+  .x-hint { position: absolute; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%); font-size: 13px; letter-spacing: .1em;
+            color: var(--ink-2); text-align: center; background: var(--glass); padding: 7px 14px; border-radius: 2px; white-space: nowrap; transition: opacity 1.2s var(--exit); }
+  .x-hint:empty { display: none; }
+  .x-hint span { font-size: 11.5px; }
+  .xui.open .x-hint { opacity: 0; }
+  /* a place's name after a jump: in, held to be read, out */
+  .x-place { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; font-size: clamp(30px, 6vw, 46px); letter-spacing: .3em;
+             opacity: 0; text-shadow: 0 0 18px var(--paper), 0 0 6px var(--paper); white-space: nowrap; }
+  .x-place span { font-size: 14px; letter-spacing: .08em; margin-top: 6px; }
+  .x-place.show { animation: xplace 3.6s linear forwards; }
+  @keyframes xplace {
+    0% { opacity: 0; animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1); }
+    13% { opacity: 1; }
+    76% { opacity: 1; animation-timing-function: cubic-bezier(0.5, 0, 0.75, 0); }
+    100% { opacity: 0; }
+  }
+  .x-loading { position: absolute; left: 50%; top: max(20px, env(safe-area-inset-top)); transform: translateX(-50%); font-size: 12.5px; letter-spacing: .12em;
+               color: var(--ink-2); background: var(--glass); padding: 5px 12px; border-radius: 2px; opacity: 0; transition: opacity .3s var(--exit); white-space: nowrap; }
+  .x-loading.on { opacity: 1; transition: opacity .3s var(--enter) .6s; }
+  .x-loading span { display: inline !important; margin-left: 6px; }
+  .xui.night .x-title, .xui.night .x-place { color: #ece5d6; text-shadow: 0 0 10px rgba(20, 18, 16, .8), 0 0 3px rgba(20, 18, 16, .8); }
+  .xui.night .x-title span, .xui.night .x-place span { color: rgba(236, 229, 214, .75); }
+  @media (max-width: 560px) {
+    .x-title b { font-size: 22px; }
+    .x-places { display: grid; grid-template-columns: 1fr 1fr; column-gap: 6px; }
+    .x-places button { min-height: 48px; font-size: 15px; }
+    .x-places button span { font-size: 10.5px; line-height: 1.25; }
+    .x-hint { white-space: normal; width: max-content; max-width: calc(100vw - 48px); }
+    .x-panel { left: 12px; right: 12px; width: auto; top: auto; bottom: 12px; max-height: 74vh; transform-origin: bottom center; }
+    .x-menu-btn { right: 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .x-panel, .xui.open .x-panel, .x-places li, .xui.open .x-places li { transform: none !important; transition-duration: .15s !important; transition-delay: 0s !important; }
+    .x-place.show { animation-duration: 3s; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" hidden></div>
+<div id="loading">
+  <div class="ld">
+    <h1>临安<i class="seal">杭</i></h1>
+    <div class="sub">南宋 · 西湖 · 一笔一画皆由代码<span>Southern Song Hangzhou, drawn entirely in code</span></div>
+    <div class="track"><div id="ld-bar"></div></div>
+    <div class="row"><div class="step" id="ld-step">展卷<span>Unrolling the scroll</span></div><div id="ld-pc">0%</div></div>
+    <div class="note" id="ld-note">Walk with WASD and look with the mouse. Desktop Chrome, Edge or Safari (WebGPU).</div>
+  </div>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,8 +1,9 @@
-// The demo and one or more scenes as a static site (for Cloudflare Pages or any static host): the demo page at the
-// root opening the first scene, each scene under scenes/<name>/ (cloned on APFS, so no space is taken), _headers
-// caching the scene files for an hour.
+// A page and one or more scenes as a static site (for Cloudflare Pages or any static host): the page at the root
+// opening the first scene, each scene under scenes/<name>/ (cloned on APFS, so no space is taken), _headers caching
+// the scene files for an hour. --page: an example (examples/<page>/: demo, the default, or linan, linan.lapla.si's
+// interface, which opens scenes/linan-city/ by itself).
 //
-//   node tools/site.mjs --scene out/scenes/linan-city [--scene …] [--vp 2] [--out out/site]
+//   node tools/site.mjs --scene out/scenes/linan-city [--scene …] [--page demo] [--vp 2] [--out out/site]
 //
 // Run `npm run build` first. Every file stays ≤ 25 MiB (a Pages limit): pack a scene with tools/pack-scene.mjs.
 import fs from 'node:fs';
@@ -19,10 +20,12 @@ const LIMIT = 25 * 1024 * 1024;
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(path.join(OUT, 'scenes'), { recursive: true });
-fs.copyFileSync(path.join(ROOT, 'examples/demo/main.js'), path.join(OUT, 'main.js'));
+const PAGE = opt('page', 'demo');
+fs.copyFileSync(path.join(ROOT, `examples/${PAGE}/main.js`), path.join(OUT, 'main.js'));
 const first = path.basename(scenes[0]);
 const vp = opt('vp', '');
-const html = fs.readFileSync(path.join(ROOT, 'examples/demo/index.html'), 'utf8').replace('<script type="module"',
+let html = fs.readFileSync(path.join(ROOT, `examples/${PAGE}/index.html`), 'utf8');
+if (PAGE === 'demo') html = html.replace('<script type="module"',
   `<script>{ const q = new URLSearchParams(location.search); if (!q.get('scene')) { q.set('scene', 'scenes/${first}/'); ` +
   `if (!q.get('vp') && '${vp}') q.set('vp', '${vp}'); history.replaceState(null, '', '?' + q); } }</script>\n<script type="module"`);
 fs.writeFileSync(path.join(OUT, 'index.html'), html);

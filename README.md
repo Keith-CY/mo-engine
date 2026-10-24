@@ -1,8 +1,10 @@
 # Mo (墨)
 
-A WebGPU engine, in TypeScript, for walkable worlds painted as Chinese ink. Its first world is 临安
-(https://linan.lapla.si). Design: `docs/ARCHITECTURE.md`; the scene files it reads: `docs/SCENE_FORMAT.md`;
-what comes next: `docs/PLAN.md`.
+A WebGPU engine, in TypeScript, for walkable worlds painted as Chinese ink. Its first world is 临安, exported from
+[Keith-CY/linan](https://github.com/Keith-CY/linan): walk it at https://linan.lapla.si (`examples/linan`, linan's
+interface over Mo; the city is 191 MiB packed, 114 MiB of it at the start, each building's finer levels fetched as you
+come near). Design: `docs/ARCHITECTURE.md`; the scene files it reads: `docs/SCENE_FORMAT.md`; what comes next:
+`docs/PLAN.md`.
 
 Two painters turn the G-buffer into ink. Painter 2 (the default, `src/render/painter2.ts`) is linan's own painter, the
 one that made its approved stills, ported pass for pass: a tone from albedo × light with each look's levels baked at
@@ -22,10 +24,11 @@ Tools (headless Chrome with the GPU and a throwaway profile, unless noted):
 node tools/shot.mjs --q "scene=…&vp=2" --vps 1,2,3     # screenshots of viewpoints
 node tools/capture.mjs --q "scene=…" --path p.json      # a video along a camera path, on the stepped clock
 node tools/drawstats.mjs --q "scene=…&vp=2"             # what each pass draws: instances, triangles, heaviest slots
-node tools/pack-scene.mjs <scene> <out>                 # (no browser) repack a scene into files of at most 24 MiB
+node tools/pack-scene.mjs <scene> <out> [--compact --gzip --lazy]   # (no browser) repack: files of at most 24 MiB;
+                                                        # for the web small formats, gzip, buildings' finer levels later
 node tools/compare/linan-site.mjs --site <linan> --path p.json   # the same path through linan's own renderer
 node tools/compare/stack.mjs left.mp4 right.mp4 out.mp4          # two captures side by side, labelled
-node tools/site.mjs --scene <scene> [--vp 2]           # (no browser) the demo and its scenes as a static site
+node tools/site.mjs --scene <scene> [--page linan]     # (no browser) a page (demo, linan) and its scenes as a static site
 node tools/gputime.mjs --q "scene=…" --vps 2,7         # GPU time per pass (stage), averaged over a few seconds
 node tools/compare/tone-levels.mjs --scene <s> --ref <dir>       # bake each look's tone levels against linan's tone
 ```

@@ -26,7 +26,7 @@ try {
   for (const vp of (args.vps || '2').split(',')) {
     await page.goto(`http://127.0.0.1:${server.port}/examples/demo/?${args.q || ''}&vp=${vp}&hud=0`, { waitUntil: 'load' });
     await page.waitForFunction('window.__mo && (window.__mo.ready || window.__mo.error)', { timeout: 600000, polling: 200 });
-    await page.evaluate(() => window.__mo.engine.stop());
+    await page.evaluate(async () => { await window.__mo.engine.settle(); window.__mo.engine.stop(); });
     await new Promise((r) => setTimeout(r, 1000));
     const res = await page.evaluate(async (configs, N, ROUNDS) => {
       const e = window.__mo.engine, r = e.renderer, dev = e.gpu.device;

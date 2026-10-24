@@ -76,6 +76,8 @@ try {
       let px;
       for (let i = 0; i < frames; i++) {
         e.camera.lookAt(p.at, p.to);
+        // (no frame shows a building waiting for its finer level)
+        await e.settle();
         px = await e.captureFrame(30);
       }
       const c = (window.__cap ??= document.createElement('canvas'));

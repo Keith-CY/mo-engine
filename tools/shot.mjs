@@ -31,6 +31,8 @@ try {
     await page.waitForFunction('window.__mo && (window.__mo.ready || window.__mo.error)', { timeout: 600000, polling: 200 });
     const err = await page.evaluate(() => window.__mo.error || null);
     if (err) { console.log('[shot] error:', err); continue; }
+    // (the finer levels near the viewpoint fetched, then the painting settles)
+    await page.evaluate(() => window.__mo.engine.settle());
     await new Promise((r) => setTimeout(r, Number(args.wait || 3) * 1000));
     const fps = await page.evaluate(() => { const f = window.__mo.engine.frameTimes.slice(-60); return f.length ? 1000 / (f.reduce((a, b) => a + b, 0) / f.length) : 0; });
     const file = path.join(OUT, `vp${vp}.png`);

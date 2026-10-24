@@ -24,6 +24,8 @@ async function main(): Promise<void> {
   const scene = P.get('scene') ? await loadMoScene(P.get('scene')!, { onProgress }) : syntheticTown(Number(P.get('seed')) || 1103, { heightfield: P.get('terrain') === '1' });
   load.style.display = 'none';
   if (P.get('fade')) engine.renderer.lodFadeFrames = Number(P.get('fade'));
+  // ?lod=0.8: every level-of-detail distance scaled (diagnostics)
+  if (P.get('lod')) engine.renderer.lodScale = Number(P.get('lod'));
   if (P.get('debug')) engine.renderer.debugView = Number(P.get('debug'));
   // the still-match painter (linan's, pass for pass) unless ?p2=0 asks for Mo's first; ?p2dbg=n its debug views
   engine.renderer.painter = P.get('p2') === '0' ? 1 : 2;

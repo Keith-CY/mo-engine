@@ -33,7 +33,7 @@ try {
   const shoot = async (vp, dbg) => {
     await page.goto(`http://127.0.0.1:${server.port}/examples/demo/?scene=${sceneUrl}&p2=1&p2dbg=${dbg}&vp=${vp}`, { waitUntil: 'load' });
     await page.waitForFunction('window.__mo && (window.__mo.ready || window.__mo.error)', { timeout: 600000, polling: 200 });
-    await page.evaluate(() => { document.getElementById('hud').hidden = true; });
+    await page.evaluate(() => { document.getElementById('hud').hidden = true; return window.__mo.engine.settle(); });
     await new Promise((r) => setTimeout(r, 2500));
     return decode(await page.screenshot({ type: 'png' }));
   };

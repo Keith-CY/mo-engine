@@ -95,6 +95,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let p = F.planes[k];
     if (dot(p.xyz, c) + p.w < -r) { return; }
   }
+  // (smaller than a pixel across: not drawn — a far rock, a boat, a house's last level; its distance alone decides)
+  if (r < length(c) * F.params.x * 0.5) { return; }
   // (dissolving instances go to their own lists, drawn through the pipeline that may discard: the dither)
   if (fading) {
     if (lvl < levels) { emitLevel(B, lvl, 3u, i); }

@@ -164,6 +164,31 @@ A scene the size of a city does not fit one file or one upload:
   a painted tidal bore's front, `[x0, z0, x1, z1, crest height far, near, crest length, 0]`, for the churned water about
   it and the paint of its class-17 wall). `sun` at the top level is the first look's.
 
+## Packed scenes
+
+What `tools/pack-scene.mjs --compact --gzip --lazy` writes for the web (the city: 2.5 GB → 191 MiB, 114 MiB of it
+fetched at the start). The loader reads either form.
+
+* **gzip**: any binary file may be gzipped (its name then ends in `.gz`); the loader inflates whatever starts with the
+  gzip bytes (a host that inflated it already is fine too).
+* **`instanceFile`**: the name of instances.bin when it is not that (`instances.bin.gz`).
+* **Array formats** besides `float32x3`, `float32x2`, `float32`, `uint32`:
+  * `unorm16x3`, `unorm16x2`, `unorm16` with `"min": […]`, `"max": […]` per component: 16-bit steps over the
+    array's own range (positions, uv, tones);
+  * `snorm16x2oct`: normals, octahedral, 2 × 16 bits (decoded to 3 floats);
+  * `float16x4`: the paint values as half floats;
+  * `uint8`, `uint16`: classes, patterns, indices in fewer bytes.
+* **`"delta": true`** on an array: it is stored component by component (all x, then all y, …), each value as its
+  difference from the one before, modulo the type's range — what gzip packs best (the indices of a builder's mesh are
+  mostly runs of +1).
+* **Heightfields** may carry `"format": "unorm16"`, `"min"`, `"max"` and `"delta": true` (each band its own run).
+* **`geometryLazy`**: `["lazy.0.bin.gz", …]`, files fetched when the eye comes near. An array reference with
+  `"lazy": k` in place of `"file"` lies in file k; a mesh's arrays all lie in one such file. The packer makes the
+  levels of a one-instance LOD group (a building) other than its last lazy where they are large. The engine fetches a
+  level's meshes once the eye is within 1.25 × the level's distance (+ 60 m) of the building, three at a time; until
+  they are there the level's range goes to the next one (the building draws coarser), then the finer level dissolves
+  in. `Engine.settle()` waits for the levels near the eye (the screenshot and capture tools use it).
+
 ## Walking
 
 * **`walk`**: where a walker may stand, beyond the terrain:

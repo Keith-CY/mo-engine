@@ -184,6 +184,18 @@ export class Engine {
   private stageAt = -1;
   private setStageAt(id: number): void { if (id !== this.stageAt) { this.stageAt = id; this.renderer.setStage(id); } }
 
+  /** resolves once the finer levels near the eye have arrived (none being fetched or due): for a screenshot or a
+   *  captured frame that must not show a building at its coarser level */
+  async settle(timeoutMs = 60000): Promise<void> {
+    const t0 = performance.now();
+    for (;;) {
+      this.renderer.stream(this.camera);
+      if (!this.renderer.streaming) return;
+      if (performance.now() - t0 > timeoutMs) { console.warn('[mo] settle: levels still on their way'); return; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
   /** one frame: the controller moves the eye by the clock's dt, the renderer draws */
   step(capture = false): void {
     const moved = this.walker.update(this.clock.dt);

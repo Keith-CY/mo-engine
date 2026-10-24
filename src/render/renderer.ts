@@ -260,15 +260,24 @@ export class Renderer {
     gb.setBindGroup(1, this.sceneBG!);
     gb.setVertexBuffer(0, s.vertices);
     gb.setIndexBuffer(s.indices, 'uint32');
+    // (a mesh fetched later draws from buffers of its own; one not there yet is not drawn)
+    const bind = (e: GPURenderBundleEncoder, cur: { v: GPUBuffer }, i: number): boolean => {
+      const sl = s.slots[i];
+      if (sl.lazy && !sl.ready) return false;
+      const vb = sl.vbuf ?? s.vertices;
+      if (cur.v !== vb) { e.setVertexBuffer(0, vb); e.setIndexBuffer(sl.ibuf ?? s.indices, 'uint32'); cur.v = vb; }
+      return true;
+    };
+    const gcur = { v: s.vertices };
     // the opaque meshes first, through the pipeline that cannot discard (hidden surfaces removed before shading); then
     // the alpha-tested cards and the impostors; then every mesh's instances dissolving between levels (their dither)
     const S = s.slots.length;
     const masked = (i: number) => s.slots[i].cutoff > 0 || s.slots[i].billboard > 0;
     gb.setPipeline(this.pipes.gbufferOpaque);
-    for (let i = 0; i < S; i++) if (!masked(i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
+    for (let i = 0; i < S; i++) if (!masked(i) && bind(gb, gcur, i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
     gb.setPipeline(this.pipes.gbuffer);
-    for (let i = 0; i < S; i++) if (masked(i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
-    for (let i = 0; i < S; i++) { gb.setBindGroup(2, this.drawBG!, [(S + i) * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, (3 * S + i) * 20); }
+    for (let i = 0; i < S; i++) if (masked(i) && bind(gb, gcur, i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
+    for (let i = 0; i < S; i++) if (bind(gb, gcur, i)) { gb.setBindGroup(2, this.drawBG!, [(S + i) * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, (3 * S + i) * 20); }
     const shadow = CASCADE_RADII.map((_, k) => {
       const e = d.createRenderBundleEncoder({ label: `mo shadow ${k} draws`, colorFormats: [], depthStencilFormat: 'depth32float' });
       e.setPipeline(this.pipes.shadow);
@@ -276,7 +285,9 @@ export class Renderer {
       e.setBindGroup(1, this.sceneBG!);
       e.setVertexBuffer(0, s.vertices);
       e.setIndexBuffer(s.indices, 'uint32');
+      const cur = { v: s.vertices };
       for (let i = 0; i < s.slots.length; i++) {
+        if (!bind(e, cur, i)) continue;
         e.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]);
         e.drawIndexedIndirect(s.args, ((k + 1) * s.slots.length + i) * 20);
       }
@@ -563,12 +574,19 @@ export class Renderer {
   }
 
   /** draws one frame to the canvas (and to the capture target when `capture`) */
+  /** fetches the finer levels the eye has come near (a level that arrives brings buffers of its own: the draws are
+   *  recorded again, and the shadows drawn again with it) */
+  stream(cam: Camera): void { this.scene?.stream(this.device, cam.position, this.lodScale, () => { this.bundles = undefined; this.shadowKeys = []; }); }
+  /** finer levels being fetched or due at the eye */
+  get streaming(): number { return this.scene?.pending ?? 0; }
+
   render(cam: Camera, timeS: number, capture = false): void {
     const d = this.device;
     const t = this.ensureTargets(cam.width, cam.height);
     this.writeFrame(cam, timeS);
     const enc = d.createCommandEncoder({ label: 'mo frame' });
     const s = this.scene;
+    this.stream(cam);
     const T = this.timer && !this.timer.busy && this.frameNo % 30 === 0 ? this.timer : undefined;
     const names: string[] = [];
     const tw = (name: string): GPUComputePassTimestampWrites | undefined => {

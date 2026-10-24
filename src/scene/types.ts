@@ -38,7 +38,13 @@ export interface MeshData {
   /** bounding sphere in the mesh's own space */
   center: [number, number, number];
   radius: number;
+  /** a mesh fetched when the eye comes near (a building's finer levels, docs/SCENE_FORMAT.md Packed scenes): its arrays
+   *  are empty until `fetch` brings them; the group draws its next level meanwhile */
+  lazy?: { vertexCount: number; indexCount: number; fetch: () => Promise<MeshArrays> };
 }
+
+/** the arrays of a mesh */
+export type MeshArrays = Pick<MeshData, 'positions' | 'normals' | 'tones' | 'uvs' | 'vclass' | 'patterns' | 'paint' | 'indices'>;
 
 export interface LodLevel {
   /** the level's mesh, or its meshes (all drawn; none: nothing over this range) */

@@ -82,6 +82,13 @@ fn cunLevel(q: vec2f, dsl: vec2f, S: f32, pxu: f32, dens: f32, kind: f32, lev: f
   }
   return cov;
 }
+/** the stills' fine horizontal hatching of the ground (linan hatchRows): rows 2.2 sheet px apart in a lattice q of
+ *  sheet px, broken into lengths; k 0 leaves only their broken lengths as a flat tone */
+fn hatchRows(q: vec2f, k: f32) -> f32 {
+  let r = q.y / 2.2; let ri = floor(r); let f = r - ri;
+  let a = vnoise2(vec2f(q.x / 55.0 + ri * 0.37, ri * 0.73)) * 0.7 + vnoise2(vec2f(q.x / 17.0, ri * 1.31 + 9.0)) * 0.3;
+  return mix(0.68, 1.0 - smoothstep(0.18, 0.5, abs(f - 0.5)), k) * smoothstep(0.3, 0.75, a);
+}
 // dry side-brush texture: world-anchored noise stretched along the stroke, thresholded by density, gathered in groups
 fn streakLevel(q: vec2f, d: vec2f, S: f32, dens: f32, kind: f32, lev: f32) -> f32 {
   let dp = vec2f(-d.y, d.x);
@@ -806,6 +813,18 @@ fn fs(v: VOut) -> @location(0) vec4f {
       if (lt > 0.01) { stk += lt * streakLevel(sq, vec2f(1.0, 0.0), exp2(l0 + 1.0), 0.16, 1.0, l0 + 1.0); }
       st += wk * stk;
     }
+    // the stills' fine horizontal hatching (a still measures the ground's lattice from the eye, pixel by pixel, and
+    // the rows come out of that; linan's tour video draws them on purpose): projected from the look's own camera, as a
+    // projector throws a slide — sheet px as seen from there, so at the viewpoint they keep a still's size, and as the
+    // eye walks off they stay on the ground and give way once their rows pass a few pixels (the eye's distance alone)
+    let V = P - K.anchor.xyz;
+    let pq = vec2f(atan2(dot(V.xz, normalize(camR.xz)), max(dot(V.xz, normalize(camF.xz)), 0.01)), atan2(-V.y, max(length(V.xz), 0.01))) / (pxA * uK);
+    let rowPx = 2.2 * uK * length(V) / max(Ds, 1e-3);
+    let hk = smoothstep(0.9, 1.6, rowPx) * (1.0 - smoothstep(5.0, 10.0, rowPx)) * step(0.02, dot(V.xz, normalize(camF.xz))) * select(0.0, 1.0, cls == C_GROUND);
+    if (hk > 0.0) {
+      let hatch = hatchRows(pq, 1.0);
+      patchN = mix(patchN, 0.3 + 0.65 * hatch * (0.6 + 0.8 * smoothstep(0.25, 0.75, patchN)), 0.85 * hk);
+    }
     let p2 = smoothstep(0.35, 0.75, p2n);
     let patches = smoothstep(0.3, 0.8, patchN);
     let nearG = 1.0 - smoothstep(far * 0.25, far * 0.7, Ds);
@@ -1022,10 +1041,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_SMALL && hasN && !night) {
     let gq = vec2f(dot(P, camR), P.y);
     let gl = log2(fp * 7.0 * uK); let gl0 = floor(gl);
-    let gd = clamp(0.25 + 0.45 * shade, 0.0, 0.8);
+    let gd = clamp(0.4 + 0.45 * shade, 0.0, 0.85);
     let blades = mix(streakLevel(gq, normalize(vec2f(0.15, -1.0)), exp2(gl0), gd, 0.0, gl0 + 80.0),
                      streakLevel(gq, normalize(vec2f(0.15, -1.0)), exp2(gl0 + 1.0), gd, 0.0, gl0 + 81.0), smoothstep(0.0, 1.0, gl - gl0));
-    cunInk = max(cunInk, blades * 0.45 * mix(0.5, 1.0, idk) * (1.0 - smoothstep(far * 0.1, far * 0.4, D)));
+    // (the stills' tufts read as dense dry strokes, not pale clumps)
+    cunInk = max(cunInk, blades * 0.7 * mix(0.5, 1.0, idk) * (1.0 - smoothstep(far * 0.1, far * 0.4, D)));
   }
 
   // ---------------- leaf marks by species, 米点 far away
@@ -1271,9 +1291,13 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let rr = select(4.0, 2.5, fineK) * uK;
     let c0 = select(gShade(gp), gAlb(gp), gLift);
     var sm = 0.0; var sn = 0.0;
+    // (grass against its own kind only: Mo's tufts are darker than its plain ground, where linan's photograph has pale
+    // tufts on dark earth, and the ring would outline every tuft)
+    let own = cls == C_SMALL;
     for (var i = 0; i < 6; i++) {
       let a = f32(i) * 1.0472 + 0.3;
       let o = vec2i(round(vec2f(cos(a), sin(a)) * rr));
+      if (own && clsOf(texA(gp + o)) != C_SMALL) { continue; }
       let vv = select(gShade(gp + o), gAlb(gp + o), gLift);
       if (vv >= 0.0) { sm += vv; sn += 1.0; }
     }
