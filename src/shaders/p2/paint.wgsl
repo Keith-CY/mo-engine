@@ -1016,7 +1016,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let under = smoothstep(0.62, 0.5, vnoise2(cu) * 0.55 + vnoise2(cu * vec2f(2.6, 1.8) + 4.0) * 0.3 + 0.075);
     w1 = max(w1, K.look6.w * band * (0.1 + 0.12 * under) * (1.0 - 0.85 * clamp(glowW * 1.4, 0.0, 1.0)));
   }
-  if (isArch(cls)) { w1 = min(w1, select(select(0.34, 0.6, match_), select(0.42, 0.7, K.mpatch.y > 0.0) * K.look.z, cls == C_ROOF)); }
+  // (a building's own material can be near black — a brick pagoda's albedo 0.07 — but the references keep walls and
+  // timber mid-grey, the eaves' shade the darkest part)
+  if (isArch(cls)) { w1 = min(w1, select(select(0.34, 0.22 + 0.26 * smoothstep(-0.15, -0.6, Nw.y), match_), select(0.42, 0.7, K.mpatch.y > 0.0) * K.look.z, cls == C_ROOF)); }
   // a far building (a pagoda across the lake) a dark silhouette in the haze
   if (match_ && isArch(cls) && !night) { w1 = max(w1, 0.36 * smoothstep(ridgeFrom * 0.8, ridgeFrom * 1.6, D) * inkGain); }
   // night: an ink night, dark and flat; the moon a clean disc of paper in a soft lighter halo; the lake a wash a
