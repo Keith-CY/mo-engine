@@ -19,9 +19,10 @@ import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 import TERRAIN from '../shaders/terrain.wgsl';
 import SURFACES from '../shaders/surfaces.wgsl';
+import HIZ from '../shaders/hiz.wgsl';
 import { Painter2 } from './painter2';
 
-const FRAME_FLOATS = 292;
+const FRAME_FLOATS = 296;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -37,6 +38,8 @@ function halton(i: number, b: number): number {
 interface Targets {
   w: number; h: number;
   a: GPUTexture; b: GPUTexture; c: GPUTexture; depth: GPUTexture; paint: GPUTexture; hist: GPUTexture[]; display: GPUTexture;
+  /** the depth pyramid of the occlusion test (src/shaders/hiz.wgsl), and a bind group per level to make it */
+  hiz: GPUTexture; hizBGs: GPUBindGroup[];
 }
 
 export interface FrameStats { slots: number; instances: number; triangles: number }
@@ -46,11 +49,11 @@ export class Renderer {
   private readonly frameBuf: GPUBuffer;
   private readonly frameData = new Float32Array(FRAME_FLOATS);
   private styleBuf: GPUBuffer;
-  private pipes!: { cull: GPUComputePipeline; gbuffer: GPURenderPipeline; gbufferOpaque: GPURenderPipeline; shadow: GPURenderPipeline; ink: GPURenderPipeline; resolve: GPURenderPipeline; present: GPURenderPipeline; capture: GPURenderPipeline };
+  private pipes!: { cull: GPUComputePipeline; cullLate: GPUComputePipeline; hizFirst: GPUComputePipeline; hizNext: GPUComputePipeline; gbuffer: GPURenderPipeline; gbufferOpaque: GPURenderPipeline; shadow: GPURenderPipeline; ink: GPURenderPipeline; resolve: GPURenderPipeline; present: GPURenderPipeline; capture: GPURenderPipeline };
   private shadowMap: GPUTexture;
   private shadowPassBuf: GPUBuffer;
   private shadowFrameBG!: GPUBindGroup;
-  private layouts!: { frame: GPUBindGroupLayout; shadowFrame: GPUBindGroupLayout; scene: GPUBindGroupLayout; draw: GPUBindGroupLayout };
+  private layouts!: { frame: GPUBindGroupLayout; shadowFrame: GPUBindGroupLayout; scene: GPUBindGroupLayout; draw: GPUBindGroupLayout; cull: GPUBindGroupLayout; hizFirst: GPUBindGroupLayout; hizNext: GPUBindGroupLayout };
   /** the alpha mask of alpha-tested cards (the scene's first texture; 1 × 1 white without one) */
   private alphaTex?: GPUTexture;
   private alphaSampler!: GPUSampler;
@@ -76,8 +79,9 @@ export class Renderer {
   private prevPose = '';
   private restFrames = 0;
   style: InkStyle;
-  /** GPU time per pass (ms), measured every 30th frame where the GPU has timestamp queries */
+  /** GPU time per pass (ms), measured every `timerEvery`th frame where the GPU has timestamp queries */
   gpuTimes: Record<string, number> = {};
+  timerEvery = 30;
   private timer?: { set: GPUQuerySet; resolve: GPUBuffer; read: GPUBuffer; busy: boolean };
   /** LOD distance scale (> 1: coarser sooner) and hysteresis */
   lodScale = 1;
@@ -91,7 +95,8 @@ export class Renderer {
   painter: 1 | 2 = 1;
   /** parts of the frame left out (benchmarks only: 'cull', 'shadow', 'gbuffer', 'resolve') */
   benchSkip = new Set<string>();
-  /** G-buffer work left out (benchmarks only, bits): 1 the surface functions, 2 the cast shadow, 4 the alpha test */
+  /** G-buffer work left out (benchmarks only, bits): 1 the surface functions, 2 the cast shadow, 4 the alpha test, 8 all
+   *  of its fragment shader but the depth and class (what the geometry alone costs) */
   benchFlags = 0;
   /** the painting's size over the screen's (the engine's render scale): the present pass upscales it */
   presentScale = 1;
@@ -99,6 +104,15 @@ export class Renderer {
   benchShadowsAlways = false;
   /** benchmarks: the G-buffer compiled without discard (foliage drawn whole); rebuildGbuffer() after a change */
   benchNoDiscard = false;
+  /** the frame-rate measures left out (bits, for A/B measurements): 1 the occlusion test (everything in view drawn),
+   *  2 its own judgement (the test drawn by everywhere, even where it hides little) */
+  perfOff = 0;
+  /** the occlusion test draws by its findings only where they pay for its second pass: every 30 frames it counts the
+   *  view's triangles it hides, and is on from 30 % hidden, off again below 20 % (switching it changes no pixel) */
+  occlusionOn = true;
+  occlusionHidden = 0;
+  private occlRead?: { buf: GPUBuffer; busy: boolean };
+  private occlBits = 0;
   rebuildGbuffer(): void {
     this.pipes.gbuffer = this.device.createRenderPipeline(this.gbufferDesc(this.surfacesCode));
     this.pipes.gbufferOpaque = this.device.createRenderPipeline(this.gbufferDesc(this.surfacesCode, true));
@@ -155,7 +169,24 @@ export class Renderer {
       { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
     ] });
     const draw = d.createBindGroupLayout({ label: 'mo draw layout', entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 32 } }] });
-    this.layouts = { frame, shadowFrame, scene, draw };
+    const cs = GPUShaderStage.COMPUTE;
+    const st = (type: GPUBufferBindingType): GPUBufferBindingLayout => ({ type });
+    const cull = d.createBindGroupLayout({ label: 'mo cull layout', entries: [
+      { binding: 0, visibility: cs, buffer: st('uniform') },
+      ...[1, 2, 3, 4].map((binding) => ({ binding, visibility: cs, buffer: st('read-only-storage') })),
+      ...[5, 6, 7, 8].map((binding) => ({ binding, visibility: cs, buffer: st('storage') })),
+      { binding: 9, visibility: cs, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 10, visibility: cs, buffer: st('storage') },
+    ] });
+    const hizFirst = d.createBindGroupLayout({ label: 'mo hiz first layout', entries: [
+      { binding: 1, visibility: cs, storageTexture: { access: 'write-only', format: 'r32float' } },
+      { binding: 2, visibility: cs, texture: { sampleType: 'depth' } },
+    ] });
+    const hizNext = d.createBindGroupLayout({ label: 'mo hiz next layout', entries: [
+      { binding: 0, visibility: cs, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 1, visibility: cs, storageTexture: { access: 'write-only', format: 'r32float' } },
+    ] });
+    this.layouts = { frame, shadowFrame, scene, draw, cull, hizFirst, hizNext };
     this.alphaSampler = d.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'repeat', addressModeV: 'repeat', maxAnisotropy: 8 });
     this.shadowCmpSampler = d.createSampler({ compare: 'less', magFilter: 'linear', minFilter: 'linear' });
     this.bindFrame();
@@ -168,8 +199,12 @@ export class Renderer {
       const m = mod(label, code);
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     };
-    const [cull, gbuffer, gbufferOpaque, shadow, ink, resolve, present, capture] = await Promise.all([
-      d.createComputePipelineAsync({ label: 'mo cull', layout: 'auto', compute: { module: mod('mo cull', CULL), entryPoint: 'main' } }),
+    const cmod = mod('mo cull', CULL), hmod = d.createShaderModule({ label: 'mo hiz', code: HIZ });
+    const [cullPipe, cullLate, hizFirstPipe, hizNextPipe, gbuffer, gbufferOpaque, shadow, ink, resolve, present, capture] = await Promise.all([
+      d.createComputePipelineAsync({ label: 'mo cull', layout: d.createPipelineLayout({ bindGroupLayouts: [cull] }), compute: { module: cmod, entryPoint: 'main' } }),
+      d.createComputePipelineAsync({ label: 'mo cull late', layout: d.createPipelineLayout({ bindGroupLayouts: [cull] }), compute: { module: cmod, entryPoint: 'late' } }),
+      d.createComputePipelineAsync({ label: 'mo hiz first', layout: d.createPipelineLayout({ bindGroupLayouts: [hizFirst] }), compute: { module: hmod, entryPoint: 'first' } }),
+      d.createComputePipelineAsync({ label: 'mo hiz next', layout: d.createPipelineLayout({ bindGroupLayouts: [hizNext] }), compute: { module: hmod, entryPoint: 'next' } }),
       d.createRenderPipelineAsync(gdesc),
       d.createRenderPipelineAsync(this.gbufferDesc(SURFACES, true)),
       d.createRenderPipelineAsync({
@@ -188,7 +223,7 @@ export class Renderer {
       fullscreen('mo present', PRESENT, this.gpu.format),
       fullscreen('mo capture', PRESENT, 'rgba8unorm'),
     ]);
-    this.pipes = { cull, gbuffer, gbufferOpaque, shadow, ink, resolve, present, capture };
+    this.pipes = { cull: cullPipe, cullLate, hizFirst: hizFirstPipe, hizNext: hizNextPipe, gbuffer, gbufferOpaque, shadow, ink, resolve, present, capture };
     await this.p2.init();
   }
 
@@ -251,9 +286,9 @@ export class Renderer {
   private noInstances?: GPUBuffer;
   /** every slot's indirect draw, recorded once (the counts live on the GPU, so the list never changes): a city's
    *  thousands of draws cost the CPU nothing per frame. Made again when a bind group they hold changes */
-  private bundles?: { gbuffer: GPURenderBundle; shadow: GPURenderBundle[] };
+  private bundles?: { gbuffer: GPURenderBundle; late: GPURenderBundle; shadow: GPURenderBundle[] };
 
-  private recordBundles(s: GpuScene): { gbuffer: GPURenderBundle; shadow: GPURenderBundle[] } {
+  private recordBundles(s: GpuScene): { gbuffer: GPURenderBundle; late: GPURenderBundle; shadow: GPURenderBundle[] } {
     const d = this.device;
     const gb = d.createRenderBundleEncoder({ label: 'mo gbuffer draws', colorFormats: ['rgba16float', 'rgba16float', 'rgba32uint'], depthStencilFormat: 'depth32float' });
     gb.setBindGroup(0, this.frameBG);
@@ -278,6 +313,17 @@ export class Renderer {
     gb.setPipeline(this.pipes.gbuffer);
     for (let i = 0; i < S; i++) if (masked(i) && bind(gb, gcur, i)) { gb.setBindGroup(2, this.drawBG!, [i * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, i * 20); }
     for (let i = 0; i < S; i++) if (bind(gb, gcur, i)) { gb.setBindGroup(2, this.drawBG!, [(S + i) * DRAW_STRIDE]); gb.drawIndexedIndirect(s.args, (3 * S + i) * 20); }
+    // the occlusion test's second phase: what the first left out and the depth it left did not hide (pass 4)
+    const lb = d.createRenderBundleEncoder({ label: 'mo gbuffer late draws', colorFormats: ['rgba16float', 'rgba16float', 'rgba32uint'], depthStencilFormat: 'depth32float' });
+    lb.setBindGroup(0, this.frameBG);
+    lb.setBindGroup(1, this.sceneBG!);
+    lb.setVertexBuffer(0, s.vertices);
+    lb.setIndexBuffer(s.indices, 'uint32');
+    const lcur = { v: s.vertices };
+    lb.setPipeline(this.pipes.gbufferOpaque);
+    for (let i = 0; i < S; i++) if (!masked(i) && bind(lb, lcur, i)) { lb.setBindGroup(2, this.drawBG!, [(2 * S + i) * DRAW_STRIDE]); lb.drawIndexedIndirect(s.args, (4 * S + i) * 20); }
+    lb.setPipeline(this.pipes.gbuffer);
+    for (let i = 0; i < S; i++) if (masked(i) && bind(lb, lcur, i)) { lb.setBindGroup(2, this.drawBG!, [(2 * S + i) * DRAW_STRIDE]); lb.drawIndexedIndirect(s.args, (4 * S + i) * 20); }
     const shadow = CASCADE_RADII.map((_, k) => {
       const e = d.createRenderBundleEncoder({ label: `mo shadow ${k} draws`, colorFormats: [], depthStencilFormat: 'depth32float' });
       e.setPipeline(this.pipes.shadow);
@@ -293,7 +339,7 @@ export class Renderer {
       }
       return e.finish();
     });
-    return { gbuffer: gb.finish(), shadow };
+    return { gbuffer: gb.finish(), late: lb.finish(), shadow };
   }
 
   /** the bind groups that hold the alpha mask (made again when a scene brings its own) */
@@ -427,21 +473,17 @@ export class Renderer {
       { binding: 0, resource: { buffer: s.instances } }, { binding: 1, resource: { buffer: s.visible } },
       { binding: 2, resource: { buffer: s.lodState } },
     ] });
-    // (one entry per slot, then one per slot for its list of instances dissolving between levels: pass 3)
-    const draws = new ArrayBuffer(Math.max(1, s.slots.length) * 2 * DRAW_STRIDE);
+    // (one entry per slot, then one per slot for its list of instances dissolving between levels (pass 3), then one
+    // for its list of the occlusion test's second phase (pass 4))
+    const draws = new ArrayBuffer(Math.max(1, s.slots.length) * 3 * DRAW_STRIDE);
     const du = new Uint32Array(draws), df = new Float32Array(draws);
-    for (const fade of [0, 1]) s.slots.forEach((sl, i) => {
-      const o = ((fade * s.slots.length + i) * DRAW_STRIDE) / 4;
-      du[o] = sl.visibleBase + fade * 3 * s.visibleTotal; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff; df[o + 6] = sl.lift; du[o + 7] = sl.billboard;
+    for (const set of [0, 1, 2]) s.slots.forEach((sl, i) => {
+      const o = ((set * s.slots.length + i) * DRAW_STRIDE) / 4;
+      du[o] = sl.visibleBase + [0, 3, 4][set] * s.visibleTotal; du[o + 1] = sl.cls; df[o + 2] = sl.tone; du[o + 3] = sl.hasTone ? 1 : 0; du[o + 4] = sl.level; df[o + 5] = sl.cutoff; df[o + 6] = sl.lift; du[o + 7] = sl.billboard;
     });
     this.drawBuf = bufferFrom(d, new Uint8Array(draws), GPUBufferUsage.UNIFORM, 'mo draws');
     this.drawBG = d.createBindGroup({ layout: this.layouts.draw, entries: [{ binding: 0, resource: { buffer: this.drawBuf, size: 32 } }] });
-    this.cullBG = d.createBindGroup({ layout: this.pipes.cull.getBindGroupLayout(0), entries: [
-      { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: s.instances } },
-      { binding: 2, resource: { buffer: s.batchOf } }, { binding: 3, resource: { buffer: s.batches } },
-      { binding: 4, resource: { buffer: s.slotBase } }, { binding: 5, resource: { buffer: s.lodState } },
-      { binding: 6, resource: { buffer: s.args } }, { binding: 7, resource: { buffer: s.visible } },
-    ] });
+    this.cullBG = undefined;
     const pass = new Uint32Array(CASCADE_RADII.length * 64);
     CASCADE_RADII.forEach((_, k) => pass.set([k, (k + 1) * s.visibleTotal, 0, 0], k * 64));
     d.queue.writeBuffer(this.shadowPassBuf, 0, pass);
@@ -451,18 +493,38 @@ export class Renderer {
     return { slots: s.slots.length, instances: s.instanceCount, triangles: s.triangles };
   }
 
+  /** the culling's inputs and outputs (both phases): made again with a new scene or new targets (the depth pyramid) */
+  private cullBindGroup(s: GpuScene, t: Targets): GPUBindGroup {
+    return this.cullBG ??= this.device.createBindGroup({ layout: this.layouts.cull, entries: [
+      { binding: 0, resource: { buffer: this.frameBuf } }, { binding: 1, resource: { buffer: s.instances } },
+      { binding: 2, resource: { buffer: s.batchOf } }, { binding: 3, resource: { buffer: s.batches } },
+      { binding: 4, resource: { buffer: s.slotBase } }, { binding: 5, resource: { buffer: s.lodState } },
+      { binding: 6, resource: { buffer: s.args } }, { binding: 7, resource: { buffer: s.visible } },
+      { binding: 8, resource: { buffer: s.seen } }, { binding: 9, resource: t.hiz.createView() }, { binding: 10, resource: { buffer: s.occStats } },
+    ] });
+  }
+
   private ensureTargets(w: number, h: number): Targets {
     if (this.targets && this.targets.w === w && this.targets.h === h) return this.targets;
-    for (const t of Object.values(this.targets ?? {})) if (Array.isArray(t)) t.forEach((x) => x.destroy()); else if (t instanceof GPUTexture) t.destroy();
+    for (const t of Object.values(this.targets ?? {})) if (Array.isArray(t)) t.forEach((x) => { if (x instanceof GPUTexture) x.destroy(); }); else if (t instanceof GPUTexture) t.destroy();
     const d = this.device;
     const tex = (label: string, format: GPUTextureFormat, extra = 0) => d.createTexture({ label, size: [w, h], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | extra });
+    // (the depth pyramid: half the size, down to one texel)
+    const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1), levels = Math.floor(Math.log2(Math.max(hw, hh))) + 1;
+    const hiz = d.createTexture({ label: 'mo hiz', size: [hw, hh], format: 'r32float', mipLevelCount: levels, usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING });
+    const depth = tex('mo depth', 'depth32float', GPUTextureUsage.COPY_SRC);
+    const mip = (k: number) => hiz.createView({ baseMipLevel: k, mipLevelCount: 1 });
+    const hizBGs = Array.from({ length: levels }, (_, k) => k === 0
+      ? d.createBindGroup({ layout: this.layouts.hizFirst, entries: [{ binding: 1, resource: mip(0) }, { binding: 2, resource: depth.createView() }] })
+      : d.createBindGroup({ layout: this.layouts.hizNext, entries: [{ binding: 0, resource: mip(k - 1) }, { binding: 1, resource: mip(k) }] }));
     const t: Targets = {
       w, h,
-      a: tex('mo gA', 'rgba16float'), b: tex('mo gB', 'rgba16float'), c: tex('mo gC', 'rgba32uint'), depth: tex('mo depth', 'depth32float'),
+      a: tex('mo gA', 'rgba16float'), b: tex('mo gB', 'rgba16float'), c: tex('mo gC', 'rgba32uint'), depth,
       paint: tex('mo paint', 'rgba16float'), hist: [tex('mo hist 0', 'rgba16float'), tex('mo hist 1', 'rgba16float')],
-      display: tex('mo display', 'rgba8unorm', GPUTextureUsage.COPY_SRC),
+      display: tex('mo display', 'rgba8unorm', GPUTextureUsage.COPY_SRC), hiz, hizBGs,
     };
     this.targets = t;
+    this.cullBG = undefined;
     const P = this.pipes;
     this.passBGs = {
       ink: this.inkBindGroup(t),
@@ -532,6 +594,8 @@ export class Renderer {
     f.set([L.lineNear ?? 8, L.lineFar ?? 900, L.snow ?? 0, L.ridgeFrom ?? 900], 268);
     f.set([...(L.veil ?? [0, 0, 0]), L.rock ?? 1], 272);
     f.set(this.fieldInfo, 276);
+    const hz = this.targets?.hiz;
+    f.set([hz?.width ?? 1, hz?.height ?? 1, hz?.mipLevelCount ?? 1, this.occlBits], 292);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.unjittered.set(unjittered);
     this.prevViewProj.set(unjittered);
@@ -539,6 +603,8 @@ export class Renderer {
   }
 
   sun: [number, number, number] = [0.45, 0.42, -0.79];
+  /** the two-phase occlusion test this frame (off with perfOff bit 1, or with no culling) */
+  private get occlusion(): boolean { return !(this.perfOff & 1) && !this.benchSkip.has('cull'); }
   /** each cascade's box and sun as last drawn, and whether it must be drawn again */
   private shadowKeys: string[] = [];
   private shadowDirty: boolean[] = [];
@@ -583,22 +649,28 @@ export class Renderer {
   render(cam: Camera, timeS: number, capture = false): void {
     const d = this.device;
     const t = this.ensureTargets(cam.width, cam.height);
+    // (the occlusion test: drawn by (bit 1) where it pays or when held on; counted (bit 2) every 30 frames)
+    const allowed = this.occlusion, held = !!(this.perfOff & 2);
+    const occl = allowed && (held || this.occlusionOn);
+    const count = allowed && !held && this.frameNo % 30 === 0 && !(this.occlRead?.busy);
+    this.occlBits = (occl ? 1 : 0) | (count ? 2 : 0);
     this.writeFrame(cam, timeS);
     const enc = d.createCommandEncoder({ label: 'mo frame' });
     const s = this.scene;
     this.stream(cam);
-    const T = this.timer && !this.timer.busy && this.frameNo % 30 === 0 ? this.timer : undefined;
+    const T = this.timer && !this.timer.busy && this.frameNo % this.timerEvery === 0 ? this.timer : undefined;
     const names: string[] = [];
     const tw = (name: string): GPUComputePassTimestampWrites | undefined => {
       if (!T) return undefined;
       names.push(name);
       return { querySet: T.set, beginningOfPassWriteIndex: names.length * 2 - 2, endOfPassWriteIndex: names.length * 2 - 1 };
     };
-    if (s && this.cullBG && !this.benchSkip.has('cull')) {
+    if (s && this.sceneBG && !this.benchSkip.has('cull')) {
       enc.copyBufferToBuffer(s.argsTemplate, 0, s.args, 0, s.slots.length * 20 * PASSES);
+      if (count) enc.clearBuffer(s.occStats);
       const cp = enc.beginComputePass({ label: 'mo cull', timestampWrites: tw('cull') });
       cp.setPipeline(this.pipes.cull);
-      cp.setBindGroup(0, this.cullBG);
+      cp.setBindGroup(0, this.cullBindGroup(s, t));
       cp.dispatchWorkgroups(Math.ceil(s.instanceCount / 64));
       cp.end();
     }
@@ -629,6 +701,32 @@ export class Renderer {
       g.executeBundles([this.bundles.gbuffer]);
     }
     g.end();
+    // the occlusion test's second phase: the depth pyramid of what the first drew, every instance in view tested
+    // against it, and what it finds seen that the first phase left out drawn into the same G-buffer
+    const counting = !!(s && this.sceneBG && this.drawBG && count && !this.benchSkip.has('gbuffer'));
+    if (s && this.sceneBG && this.drawBG && (occl || counting) && !this.benchSkip.has('gbuffer')) {
+      const hp = enc.beginComputePass({ label: 'mo hiz', timestampWrites: tw('hiz') });
+      t.hizBGs.forEach((bg, k) => {
+        hp.setPipeline(k ? this.pipes.hizNext : this.pipes.hizFirst);
+        hp.setBindGroup(0, bg);
+        const w = Math.max(1, t.hiz.width >> k), h = Math.max(1, t.hiz.height >> k);
+        hp.dispatchWorkgroups(Math.ceil(w / 8), Math.ceil(h / 8));
+      });
+      hp.setPipeline(this.pipes.cullLate);
+      hp.setBindGroup(0, this.cullBindGroup(s, t));
+      hp.dispatchWorkgroups(Math.ceil(s.instanceCount / 64));
+      hp.end();
+      if (counting) enc.copyBufferToBuffer(s.occStats, 0, (this.occlRead ??= { buf: d.createBuffer({ label: 'mo occlusion stats read', size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false }).buf, 0, 16);
+    }
+    if (s && this.sceneBG && this.drawBG && occl && !this.benchSkip.has('gbuffer')) {
+      const g2 = enc.beginRenderPass({
+        label: 'mo gbuffer late', timestampWrites: tw('gbuffer2'),
+        colorAttachments: [t.a, t.b, t.c].map((x) => ({ view: x.createView(), loadOp: 'load' as const, storeOp: 'store' as const })),
+        depthStencilAttachment: { view: t.depth.createView(), depthLoadOp: 'load', depthStoreOp: 'store' },
+      });
+      g2.executeBundles([this.bundles!.late]);
+      g2.end();
+    }
     const pass = (label: string, view: GPUTextureView, pipe: GPURenderPipeline, bg: GPUBindGroup) => {
       const p = enc.beginRenderPass({ label, timestampWrites: tw(label.slice(3)), colorAttachments: [{ view, loadOp: 'clear', storeOp: 'store', clearValue: [1, 1, 1, 1] }] });
       p.setPipeline(pipe); p.setBindGroup(0, bg); p.draw(3); p.end();
@@ -648,6 +746,20 @@ export class Renderer {
       enc.copyBufferToBuffer(T.resolve, 0, T.read, 0, names.length * 16);
     }
     d.queue.submit([enc.finish()]);
+    // (what the count found decides whether the test draws by its findings from now on)
+    if (counting && this.occlRead) {
+      const R = this.occlRead;
+      R.busy = true;
+      R.buf.mapAsync(GPUMapMode.READ).then(() => {
+        const [hid, saw] = new Uint32Array(R.buf.getMappedRange(0, 8));
+        R.buf.unmap();
+        R.busy = false;
+        if (hid + saw > 0) {
+          this.occlusionHidden = hid / (hid + saw);
+          this.occlusionOn = this.occlusionHidden > (this.occlusionOn ? 0.2 : 0.3);
+        }
+      }).catch(() => { R.busy = false; });
+    }
     if (T && names.length) {
       T.busy = true;
       T.read.mapAsync(GPUMapMode.READ).then(() => {
@@ -670,6 +782,8 @@ export class Renderer {
   cut(): void {
     const s = this.scene;
     if (s) this.device.queue.writeBuffer(s.lodState, 0, new Uint32Array(s.instanceCount).fill(0xffff));
+    // (and the occlusion test starts again from everything seen: the first frame draws all in view in its first phase)
+    if (s) this.device.queue.writeBuffer(s.seen, 0, new Uint32Array(s.instanceCount).fill(1));
     this.frameNo = 0;
     this.shadowKeys = [];
   }
@@ -690,7 +804,7 @@ export class Renderer {
 
   /** what the last frame drew, per pass (the view, then each cascade): instances and triangles, and the slots with
    *  the most triangles (the diagnostics of a large scene) */
-  async readDrawStats(top = 8): Promise<{ passes: { instances: number; triangles: number }[]; heaviest: { pass: number; mesh: string; level: number; instances: number; triangles: number }[] }> {
+  async readDrawStats(top = 8): Promise<{ passes: { instances: number; triangles: number; undrawn: number }[]; heaviest: { pass: number; mesh: string; level: number; instances: number; triangles: number }[] }> {
     const s = this.scene;
     if (!s) return { passes: [], heaviest: [] };
     const size = s.slots.length * 20 * PASSES;
@@ -701,15 +815,18 @@ export class Renderer {
     await buf.mapAsync(GPUMapMode.READ);
     const a = new Uint32Array(buf.getMappedRange().slice(0));
     buf.unmap(); buf.destroy();
-    const passes: { instances: number; triangles: number }[] = [], all: { pass: number; mesh: string; level: number; instances: number; triangles: number }[] = [];
+    // (the triangles a draw really has: a mesh out of the season, the look or the stage has none; its instances
+    // listed all the same are counted as undrawn)
+    const passes: { instances: number; triangles: number; undrawn: number }[] = [], all: { pass: number; mesh: string; level: number; instances: number; triangles: number }[] = [];
     for (let p = 0; p < PASSES; p++) {
-      let inst = 0, tris = 0;
+      let inst = 0, tris = 0, undrawn = 0;
       s.slots.forEach((sl, i) => {
-        const n = a[(p * s.slots.length + i) * 5 + 1], t = (n * sl.indexCount) / 3;
+        const o = (p * s.slots.length + i) * 5, n = a[o + 1], t = (n * a[o]) / 3;
+        if (!a[o]) { undrawn += n; return; }
         inst += n; tris += t;
         if (n) all.push({ pass: p, mesh: this.meshNames[sl.mesh] ?? String(sl.mesh), level: sl.level, instances: n, triangles: t });
       });
-      passes.push({ instances: inst, triangles: tris });
+      passes.push({ instances: inst, triangles: tris, undrawn });
     }
     all.sort((x, y) => y.triangles - x.triangles);
     return { passes, heaviest: all.slice(0, top) };

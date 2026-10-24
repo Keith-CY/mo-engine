@@ -47,9 +47,9 @@ function packVertices(m: MeshData, a: MeshArrays, stage: { f: Float32Array; w: U
 /** a level of a one-instance batch whose meshes are fetched when the eye comes near */
 interface LazyLevel { batch: number; level: number; meshes: number[]; centre: [number, number, number]; radius: number; state: 'idle' | 'loading' | 'ready' | 'failed' }
 
-/** passes the culling fills: the view, then each shadow cascade (src/shaders/frame.wgsl CASCADES) */
-/** the instance lists per slot: 0 the view, 1 + k shadow cascade k, 3 the view's instances dissolving between levels */
-export const PASSES = 4;
+/** the instance lists per slot: 0 the view, 1 + k shadow cascade k (src/shaders/frame.wgsl CASCADES), 3 the view's
+ *  instances dissolving between levels, 4 the view's second phase (seen only by the occlusion test after the first) */
+export const PASSES = 5;
 
 export interface Slot {
   mesh: number;
@@ -94,6 +94,10 @@ export class GpuScene {
   readonly batches: GPUBuffer;
   readonly slotBase: GPUBuffer;
   readonly lodState: GPUBuffer;
+  /** per instance, 1 where the last occlusion test saw it (the next frame's first phase draws those) */
+  readonly seen: GPUBuffer;
+  /** what an occlusion test found, when asked to count: the triangles it hid, the triangles it saw */
+  readonly occStats: GPUBuffer;
   /** indirect draw arguments, 5 words per slot; instanceCount zeroed each frame from `argsTemplate` */
   readonly args: GPUBuffer;
   readonly argsTemplate: GPUBuffer;
@@ -218,6 +222,8 @@ export class GpuScene {
     this.slotBase = bufferFrom(device, new Uint32Array(this.slots.map((s) => s.visibleBase)), GPUBufferUsage.STORAGE, 'mo slotBase');
     this.lodState = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(0xffff), GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, 'mo lodState');
     // (the state word: no level (0xff) and none being left (0xff) — a 0 there would read as dissolving out of level 0)
+    this.seen = bufferFrom(device, new Uint32Array(scene.instanceCount).fill(1), GPUBufferUsage.STORAGE, 'mo seen');
+    this.occStats = device.createBuffer({ label: 'mo occlusion stats', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     // one set of draws per pass (the view, then each cascade)
     const args = new Uint32Array(this.slots.length * 5 * PASSES);
     for (let p = 0; p < PASSES; p++) this.slots.forEach((s, i) => args.set([s.lazy ? 0 : s.indexCount, 0, s.firstIndex, s.baseVertex, 0], (p * this.slots.length + i) * 5));
@@ -225,7 +231,7 @@ export class GpuScene {
     this.argsData = args;
     this.args = bufferFrom(device, args, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_SRC, 'mo args');
     this.visibleTotal = visibleTotal;
-    this.visible = device.createBuffer({ label: 'mo visible', size: Math.max(16, visibleTotal * 4 * PASSES), usage: GPUBufferUsage.STORAGE });
+    this.visible = device.createBuffer({ label: 'mo visible', size: Math.max(16, visibleTotal * 4 * PASSES), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
   }
 
   /** a batch's level distances as they stand: a level not yet fetched gives its range to the next one */

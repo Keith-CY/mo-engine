@@ -242,6 +242,7 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let pattern = (v.flags >> 8u) & 0xffu;
   let kind = v.flags >> 16u;
   let bench = u32(F.layering.z + 0.5);
+  if ((bench & 8u) != 0u) { var q: GOut; q.a = vec4f(0.0, 0.0, v.depth, f32(v.cls)); q.b = vec4f(1.0, 1.0, v.tone, 1.0); q.c = vec4u(v.seed, v.id, 0u, 0u); return q; }
   if (alpha == 1u && a < D.cutoff && (bench & 4u) == 0u) { discard; }
   // a flowering crown is mostly air, as the references paint it: clusters of blossom along the limbs with the ground
   // and the sky between them (holes in smooth world-anchored noise, so they hold still as the eye moves)
