@@ -2,7 +2,9 @@
 // made, the motion plays at its real pace), in headless Chrome (GPU, throwaway profile), then encoded with ffmpeg.
 //
 //   node tools/capture.mjs --q "scene=/out/scenes/…/" --path path.json [--out out/capture] [--w 1440 --h 900]
-//                          [--fps 30] [--name mo.mp4] [--crf 20] [--settle 1.5]
+//                          [--fps 30] [--name mo.mp4] [--crf 20] [--settle 1.5] [--page linan]
+//   --page linan: linan's page (examples/linan: its looks restyled, its LOD scale) without its interface, as the site
+//   shows it
 //
 // path.json: { "keys": [ { "t": 0, "at": [x, y, z], "to": [x, y, z], "fov": 42, "look": 2, "fly": false }, … ] }
 // Between two keys the eye and its target ease (smoothstep) from one to the next; a key with "cut": true jumps to it
@@ -49,9 +51,10 @@ try {
   page.on('pageerror', (e) => console.log('[page:error]', e.message));
   const q = new URLSearchParams(args.q || '');
   q.set('dpr', '1');
-  await page.goto(`http://127.0.0.1:${server.port}/examples/demo/?${q}`, { waitUntil: 'load' });
+  if (args.page === 'linan') { q.set('ui', '0'); q.set('wm', '0'); }
+  await page.goto(`http://127.0.0.1:${server.port}/examples/${args.page === 'linan' ? 'linan' : 'demo'}/?${q}`, { waitUntil: 'load' });
   await page.waitForFunction('window.__mo && (window.__mo.ready || window.__mo.error)', { timeout: 900000, polling: 200 });
-  await page.evaluate(() => { document.getElementById('hud').hidden = true; window.__mo.engine.beginCapture(); });
+  await page.evaluate(() => { const h = document.getElementById('hud'); if (h) h.hidden = true; window.__mo.engine.beginCapture(); });
   const n = Math.round(T * FPS) + 1;
   let lastLook = null, settle = 0, written = 0;
   const t0 = Date.now();
