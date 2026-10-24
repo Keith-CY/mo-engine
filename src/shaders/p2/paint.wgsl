@@ -795,7 +795,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // in shade, the undersides of the eaves and the brackets dark
   if (match_ && !night && (cls == C_WALL || cls == C_WOOD || cls == C_STONE || cls == C_DARK) && hasN) {
     let eaveU = smoothstep(-0.15, -0.6, Nw.y);
-    w0 = max(w0, select(0.06, 0.12, cls == C_WOOD || cls == C_DARK) + 0.3 * shade + 0.45 * eaveU);
+    w0 = max(w0, select(0.05, 0.08, cls == C_WOOD || cls == C_DARK) + 0.2 * shade + 0.42 * eaveU);
   }
   // a slab path as the references paint it: each slab its own flat grey (the G-buffer's slab id), the joints dark
   if (cls == C_PAVE && !night) {
@@ -1236,7 +1236,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let dA = abs(fract(a / 6.2831 * 13.0 + 0.5) - 0.5) / 13.0 * 6.2831;
     let px = fp * uK;
     vein = smoothstep(px * 1.1, px * 0.3, r * sin(dA)) * smoothstep(px * 4.0, px * 10.0, r) * (1.0 - smoothstep(near * 0.8, near * 2.5, D));
-    vein *= 0.55 * smoothstep(0.3, 0.55, lodNoise(P + 4.4, fp * 25.0 * uK));
+    vein *= select(0.55, 0.3, match_) * smoothstep(0.3, 0.55, lodNoise(P + 4.4, fp * 25.0 * uK));
   }
   // ---------------- water: blank paper with sparse ripple lines (水纹 rows where the look asks for them)
   var wave = 0.0;
