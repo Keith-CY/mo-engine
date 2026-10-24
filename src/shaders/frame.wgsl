@@ -44,6 +44,7 @@ struct Frame {
   fieldNearB: vec4f,      // … depth (samples), 1 when there is one
   fieldFar: vec4f,        // the far one
   fieldFarB: vec4f,
+  occl: vec4f,            // occlusion culling: the depth pyramid's first level (w, h texels), its levels, 1 when on
 };
 
 const CASCADES = 2u;

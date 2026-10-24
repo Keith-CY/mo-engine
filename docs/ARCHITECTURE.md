@@ -62,12 +62,16 @@ Dependencies only point down. `gpu/` and `core/` know nothing about ink; `ink/` 
 ```
 input → controller → camera pose (clock dt)
 compute: cull + LOD per instance (frustum, distance with hysteresis) → per (mesh, level) visible lists → indirect args
+         (the view's lists: only what the last frame's occlusion test saw)
 shadow:  2–3 cascades, texel-snapped to the world (no shimmer while turning), refreshed by distance moved, not per frame
 gbuffer: one pass, MRT
            A rgba16float  view normal (oct, 2) · view depth (m) · class id
            B rgba16float  sun irradiance (N·L × shadow) · sky irradiance × AO · albedo luminance · emissive
            C rgba32uint   object seed · instance id · surface uv packed (for marks anchored to the surface)
            depth32float   reverse-Z
+occlusion: the depth so far reduced to a pyramid of farthest depths; every instance in view tested against it; what
+         it sees that the first lists left out drawn into the same G-buffer (nothing appears a frame late), what it
+         finds the next frame's first lists
 ink:     paper (camera sphere) → washes (tone → ink, fixed curve per look) → surface marks → lines → mist
 resolve: reprojection through depth; the history converges to the full-quality painting while the eye rests
 present: to the canvas (and to the capture target when capturing)
@@ -85,7 +89,12 @@ heightfields, water, viewpoints. At load:
 Every frame a compute pass culls each instance against the frustum and the shadow cascades, picks its LOD level by
 distance (a per-instance state word keeps the last level for hysteresis and the dissolve phase) and appends it to the
 visible list of its (mesh, level); one `drawIndexedIndirect` per (mesh, level) draws them. CPU cost per frame does not
-grow with the number of objects. Vegetation is just instanced meshes with LOD groups (no camera-facing impostors:
+grow with the number of objects. Occlusion is tested in two phases on the GPU (src/shaders/cull.wgsl): the view first
+draws what was seen last frame, then every instance in view is tested against a pyramid of the farthest depths drawn so
+far (src/shaders/hiz.wgsl: its bounding sphere's exact screen rectangle, read where it spans 2 × 2 texels) and what is
+seen but not yet drawn is drawn in a second pass into the same G-buffer. Only what lies wholly behind drawn surfaces is
+left out, so the picture is the same as drawing everything; at 飞来峰, at the foot of the cliff, two thirds of the view's
+triangles (the woods behind it) go. Vegetation is just instanced meshes with LOD groups (no camera-facing impostors:
 they turn with the view).
 
 ## 6. Terrain
