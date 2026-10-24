@@ -87,12 +87,19 @@ fn billboardShape(shape: u32, q: vec2f, seed: f32) -> vec2f {
     a = max(step(d, e), step(abs(u - lean), 0.045) * step(v, 0.8));
     dark = smoothstep(e - 0.3, e, d);
   } else if (shape == 2u) {
-    let d = length(vec2f(u, (v - 0.68) / 0.36));
-    let hem = 0.12 + 0.18 * vnoise(vec3f(u * 7.0 + seed * 9.0, 0.0, 0.5)) + 0.08 * (1.0 - abs(u));
-    let curtain = step(abs(u), 0.88 + 0.1 * (n - 0.5)) * step(hem, v) * step(v, 0.8);
-    let e = 0.92 + 0.25 * (n - 0.5);
-    a = max(max(step(d, e), curtain * step(0.32, n2 + 0.2)), step(abs(u), 0.07) * step(v, 0.4));
-    dark = smoothstep(0.6, 0.15, v) * 0.6;
+    // (as the references draw a willow far off: a broad low crown on a leaning trunk, its hanging strands a comb of
+    // threads of different lengths with the light between them — not a dome over an even curtain, which read as a heart)
+    let lean = (seed - 0.5) * 0.25 * v;
+    let uu = u - lean;
+    let d = length(vec2f(uu / 1.05, (v - 0.76) / 0.24));
+    let e = 0.9 + 0.25 * (n - 0.5);
+    let cq = (uu + 1.0) * 10.0;
+    let hc = hash3(vec3i(i32(floor(cq)), i32(seed * 997.0), 41));
+    let hem = 0.06 + 0.46 * hc * hc + 0.06 * (n - 0.5);
+    let strand = step(abs(fract(cq) - 0.5), 0.3 + 0.12 * hc);
+    let curtain = step(abs(uu), 0.95 + 0.08 * (n - 0.5)) * step(hem, v) * step(v, 0.8) * strand;
+    a = max(max(step(d, e), curtain), step(abs(uu + 0.04 * sin(v * 6.0 + seed * 9.0)), 0.055) * step(v, 0.6));
+    dark = smoothstep(0.65, 0.2, v) * 0.5;
   } else if (shape == 3u) {
     let d = length(vec2f(u, (v - 0.58) / 0.45));
     let e = 0.88 + 0.35 * (n - 0.5) + 0.2 * (n2 - 0.5);

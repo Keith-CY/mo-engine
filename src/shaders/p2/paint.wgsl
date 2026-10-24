@@ -1473,6 +1473,20 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let foot = 1.0 - smoothstep(0.0, 140.0, RG.g);
     ink += K.look5.z * ((0.05 + 0.08 * shade) * (0.5 + 0.8 * foot) + 0.06 * streak + 0.22 * course) * mix(0.6, 1.0, idk);
   }
+  // a willow's crown hangs: its lower part opens into strands, the gaps between them painted as what lies behind —
+  // the paper by day, the night sky's wash at night (world-anchored vertical gaps, a few pixels apart at any distance,
+  // denser toward the hem; the low-poly hull read as one solid lobed blob)
+  if (cls == C_WILLOW && match_ && hasN) {
+    let h = P.y - Cw.y;
+    let hem = 1.0 - smoothstep(3.2, 6.2, h);
+    let c = max(0.18, fp * uK * 3.0);
+    let sn = vnoise3(vec3f(P.x / c, P.y / (c * 10.0), P.z / c) + vec3f(1.3, 7.1, 4.4));
+    let gap = smoothstep(0.55 * hem, 0.55 * hem - 0.06, sn) * step(1.0, h) * step(0.001, hem);
+    if (gap > 0.0) {
+      let behind = select(0.0, (0.52 + 0.22 * smoothstep(0.0, 0.45, dirW.y)) * K.sh2.x, night);
+      ink = mix(ink, behind, gap);
+    }
+  }
   // haze: beyond the haze distance everything fades toward the paper
   if (K.look2.w > 0.0 && cls != C_SKY) { ink *= 1.0 - 0.8 * smoothstep(K.look2.w, K.look2.w * 2.5, D); }
   ink *= 1.0 - mist;
