@@ -1479,8 +1479,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_WILLOW && match_ && hasN) {
     let h = P.y - Cw.y;
     let hem = 1.0 - smoothstep(3.2, 6.2, h);
-    let c = max(0.18, fp * uK * 3.0);
-    let sn = vnoise3(vec3f(P.x / c, P.y / (c * 10.0), P.z / c) + vec3f(1.3, 7.1, 4.4));
+    // (the spacing in power-of-two levels blended by distance: a scale that follows the distance continuously would
+    // make the gaps crawl as the eye walks)
+    let sn = lodNoise(vec3f(P.x, P.y * 0.1, P.z) + vec3f(1.3, 7.1, 4.4), max(0.18, fp * uK * 3.0));
     let gap = smoothstep(0.55 * hem, 0.55 * hem - 0.06, sn) * step(1.0, h) * step(0.001, hem);
     if (gap > 0.0) {
       let behind = select(0.0, (0.52 + 0.22 * smoothstep(0.0, 0.45, dirW.y)) * K.sh2.x, night);
