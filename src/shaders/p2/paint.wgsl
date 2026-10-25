@@ -479,7 +479,7 @@ fn paintedRanges(dirW: vec3f) -> vec3f {
         // (the references' snowy peaks: grey on their shaded spurs and in the gullies, the snow left paper, the crest
         // only a broken breath of a line)
         w = select(ink * 0.22 * exp(-below / fade) * (0.4 + 0.9 * mot) * smoothstep(0.0, pxA * 3.0 * uK, below),
-                   ink * (0.3 * line + 0.75 * crev * exp(-below / (fade * 0.45)) + 0.5 * spur * dn + 0.1 * dn * mot), kk < 0.5);
+                   ink * (0.12 * line + 0.75 * crev * exp(-below / (fade * 0.45)) + 0.6 * spur * dn + 0.16 * dn * mot), kk < 0.5);
       } else if (match_) {
         let mot = vnoise2(d2 * (7.0 + 2.0 * fk) + fk * 4.1) * 0.65 + vnoise2(d2 * 23.0 + fk * 1.7) * 0.35;
         // the woods on it in fine dots, thickest under the crest; the crest itself feathered into the sky
@@ -807,6 +807,10 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_LOTUS && !night) { w0 = 0.5 + 0.3 * shade + 0.15 * smoothstep(0.4, 0.95, 1.0 - abs(Nw.y)); }
   // roofs: each plane one flat wash (界画), set by the painter's light, not by the cast shadows
   if ((cls == C_ROOF || cls == C_CITYFAR) && !night) { w0 = mix(0.78, 0.44, smoothstep(0.2, 0.85, LL.y)); }
+  // snow lying on what faces up — roofs, a bridge's deck and parapet tops, stone, timber — left as paper, as ink10 leaves
+  // the pavilion's roof and the 断桥 white; the eaves' edges and the faces below keep their ink
+  let snowTop = select(0.0, smoothstep(0.3, 0.6, Nw.y), paperLift > 0.5 && !night && hasN && match_ && (isArch(cls) || cls == C_ROCK));
+  w0 = mix(w0, 0.025, snowTop);
   // 墨分五色 over a city: each building's roof its own depth of ink
   if (cls == C_ROOF && !night && K.mpatch.y > 0.0) {
     let bh = h13(vec3i(floor(Cw * 0.5)) + 313);
@@ -1226,7 +1230,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let dl = abs(fract(u / S) - 0.5) * S / px;
       let along = dot(P, normalize(cross(tA, Nw)));
       let brk = smoothstep(0.3, 0.55, vnoise2(vec2f(floor(u / S) * 3.7, along / max(px * 25.0, 0.2))));
-      tiles = smoothstep(0.35 + 0.7, 0.35 - 0.2, abs(dl - S / px * 0.5)) * brk * (0.55 + 0.45 * shade) * (1.0 - smoothstep(far * 0.15, far * 0.5, D));
+      tiles = smoothstep(0.35 + 0.7, 0.35 - 0.2, abs(dl - S / px * 0.5)) * brk * (0.55 + 0.45 * shade) * (1.0 - smoothstep(far * 0.15, far * 0.5, D)) * (1.0 - 0.85 * snowTop);
     }
   }
   // ---------------- lotus veins: 勾筋 radiating from the leaf centre, near leaves only
@@ -1451,7 +1455,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     det *= 1.0 - farW;
     if (gLift && cls != C_PAVE) { det *= 1.0 - 0.85 * K.look5.w; }
     if (K.look5.z > 0.0 && cls == C_STONE && hasN && abs(Nw.y) < 0.6) { det *= 1.0 - 0.9 * K.look5.z; }
-    ink += det * (1.0 - snowK * 0.7);
+    ink += det * (1.0 - max(snowK * 0.7, snowTop * 0.85));
     detK = det;
   }
   // the slab joints Mo's G-buffer draws on a paved path (linan's come from the photograph's own slabs)
