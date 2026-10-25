@@ -4,6 +4,7 @@
 //   --refs: pairs (reference left, Mo right) from dir/inkNN.jpg into <out>/pairs/pN.jpg
 //   --walk "vp:metres:turn°,…": instead of the viewpoints, an eye that went to a place, walked that far ahead (on the
 //   ground, eye 1.6 m) and turned (walk-<vp>-<m>-<turn>.png)
+//   --cams "x,y,z,tx,ty,tz[,fov];…": instead, eyes placed by hand looking at a target (cam1.png, cam2.png, …)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -52,7 +53,21 @@ try {
     await page.screenshot({ path: file });
     console.log(`[look] ${path.relative(ROOT, file)}`);
   }
-  for (const vp of walks.length ? [] : vps) {
+  const cams = (args.cams || '').split(';').filter(Boolean).map((c) => c.split(',').map(Number));
+  for (const [i, c] of cams.entries()) {
+    await page.evaluate((c) => {
+      const e = window.__mo.engine; window.__mo.go(c[7] || 8);
+      e.camera.lookAt([c[0], c[1], c[2]], [c[3], c[4], c[5]]);
+      if (c[6]) e.camera.fovY = c[6];
+      e.walker.pin();
+    }, c);
+    await page.evaluate(() => window.__mo.engine.settle());
+    await new Promise((r) => setTimeout(r, Number(args.wait || 1.5) * 1000));
+    const file = path.join(OUT, `cam${i + 1}.png`);
+    await page.screenshot({ path: file });
+    console.log(`[look] ${path.relative(ROOT, file)}`);
+  }
+  for (const vp of walks.length || cams.length ? [] : vps) {
     await page.evaluate((id) => window.__mo.go(id), vp);
     await page.evaluate(() => window.__mo.engine.settle());
     await new Promise((r) => setTimeout(r, Number(args.wait || 1.5) * 1000));

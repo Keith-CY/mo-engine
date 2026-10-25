@@ -725,9 +725,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // a pale ground: the ground, the grass and the paving take the painter's light only, not the trees' cast shadows
   let gLift = K.look5.w > 0.0 && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE) && !night;
   if (gLift) { plit = mix(plit, mix(plB, LL.y, 0.4), K.look5.w); }
-  // (and in every look the ground, the grass and the paving carry no cast shadows: the references paint none, and
-  // a wood's shadow on a path reads as camouflage blotches)
-  else if (match_ && !night && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE)) { plit = mix(plB, LL.y, 0.4); }
+  // (and in every look the ground, the grass, the paving and the carved figures carry no cast shadows: the references
+  // paint none, and a wood's shadow on a path or a statue reads as camouflage blotches)
+  else if (match_ && !night && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE || cls == C_FIGURE)) { plit = mix(plB, LL.y, 0.4); }
   let shade = 1.0 - plit;
   let farS = smoothstep(ridgeFrom * 0.5, ridgeFrom, D) * select(0.0, 1.0, isLand(cls) || isFol(cls) || cls == C_CITYFAR);
   tF = mix(tF, tB, farS * 0.5);
@@ -849,10 +849,14 @@ fn fs(v: VOut) -> @location(0) vec4f {
     w0 = mix(w0, rw, nearR);
   }
   if (cls == C_FIGURE && !night) {
-    // (the form turning away from the eye: the angle the eye sees it at)
+    // the carving is the cliff's own grey stone (ink08): a pale grey on the lit belly and face, a mid grey turning
+    // away and in shade, deep in the folds and the hollows, mottled by the weather — not paper with an outline
     let rimV = pow(1.0 - clamp(abs(dot(Nw, dirW)), 0.0, 1.0), 1.5);
-    let pv = smoothstep(0.1, 0.9, LL.y);
-    w0 = mix(w0, 0.015 + 0.2 * rimV + 0.06 * (1.0 - pv) + 0.08 * smoothstep(0.4, 0.1, tF), nearR);
+    // (lit from its own form: the light buffers carry the leaves' dappled shadows)
+    let pv = smoothstep(-0.2, 0.8, 0.6 * dot(Nw, F.sun.xyz) + 0.4 * Nw.y);
+    let mot = lodNoise(P * vec3f(1.0, 0.7, 1.0) + 41.0, fp * 60.0 * uK);
+    let mot2 = lodNoise(P * 2.3 + 9.0, fp * 18.0 * uK);
+    w0 = mix(w0, 0.07 + 0.24 * (1.0 - pv) + 0.12 * rimV + 0.1 * (mot - 0.5) + 0.05 * (mot2 - 0.5), nearR);
   }
   // far ranges: pale washes keyed to their (small) contrast against the haze
   let farW = smoothstep(ridgeFrom * 0.5, ridgeFrom, D) * select(0.0, 1.0, isLand(cls) || isFol(cls) || cls == C_CITYFAR);
@@ -1096,7 +1100,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // a sky wash (and a roof plane) is laid flat, in one go
   if (cls == C_SKY || cls == C_LOTUS || cls == C_GLOW || (night && (isArch(cls) || isLand(cls) || isFol(cls)))
       || (cls == C_WATER && (night || paperLift > 0.5 || K.look5.x > 0.0 || K.waterRefl.y > 0.0)) || cls == C_ROOF || cls == C_CITYFAR
-      || ((cls == C_ROCK || cls == C_NICHE) && nearR > 0.5) || (cls == C_PAVE && match_)) { wash = w1; }
+      || ((cls == C_ROCK || cls == C_NICHE || cls == C_FIGURE) && nearR > 0.5) || (cls == C_PAVE && match_)) { wash = w1; }
 
   // far ranges: dark at the ridge, fading downward into mist (留白)
   let farK = smoothstep(ridgeFrom * 0.7, ridgeFrom * 1.4, D) * select(0.0, 1.0, uRidge > 0.0 && cls != C_SKY && cls != C_WATER);

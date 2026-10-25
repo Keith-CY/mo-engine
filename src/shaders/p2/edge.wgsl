@@ -28,7 +28,7 @@ fn classLine(c: u32) -> array<f32, 5> {
   if (c == C_CITYFAR) { r[0] = 0.32; r[1] = 0.08; r[3] = 0.4; }
   if (c == C_GROUND) { r = array<f32, 5>(0.07, 0.0, r[2], 1.0, 2.0); }
   if (c == C_ROCK) { r = array<f32, 5>(0.4, 0.15, 0.75, 1.2, 3.0); }
-  if (c == C_FIGURE) { r = array<f32, 5>(0.9, 0.6, 0.12, 0.42, 4.0); }
+  if (c == C_FIGURE) { r = array<f32, 5>(0.6, 0.45, 0.12, 0.42, 4.0); }   // (a fine grey contour: the stone is modelled in tone)
   if (c == C_NICHE) { r = array<f32, 5>(0.8, 0.3, 0.5, 1.1, 3.0); }
   if (c == C_BARK) { r = array<f32, 5>(0.8, 0.1, 0.6, 1.1, r[4]); }
   if (isTree(c)) { r[0] = 0.06; r[3] = 0.6; r[4] = 2.0; }
