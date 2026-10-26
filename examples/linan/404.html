@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>此页不存在 · 临安</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<style>
+  /* linan.lapla.si's 404, in the loading screen's look (examples/linan/index.html) */
+  :root {
+    --paper: #eee8db; --ink: #1d1b18; --ink-2: #4a463f; --ink-3: #807a6f; --seal: #a8321f; --line: rgba(29, 27, 24, 0.16);
+    --serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", serif;
+    --latin: "Iowan Old Style", "Palatino", "Georgia", serif;
+  }
+  html, body { margin: 0; min-height: 100%; background: var(--paper); color: var(--ink); }
+  body { display: grid; place-items: center; min-height: 100vh; font-family: var(--serif); }
+  main { width: min(420px, calc(100vw - 32px)); padding: 32px 0; }
+  h1 { margin: 0; font-weight: 400; font-size: clamp(54px, 13vw, 92px); letter-spacing: .18em; line-height: 1; }
+  .seal { display: inline-block; margin-left: 6px; vertical-align: 22%; width: 22px; height: 22px; background: var(--seal); color: #f4ead8;
+          font-size: 13px; font-style: normal; line-height: 22px; text-align: center; letter-spacing: 0; border-radius: 2px; }
+  .track { margin-top: 44px; height: 1px; background: var(--line); }
+  p { margin: 18px 0 0; font-size: 17px; letter-spacing: .12em; }
+  p span { display: block; margin-top: 4px; font-family: var(--latin); letter-spacing: .02em; font-size: 14px; color: var(--ink-3); }
+  a { display: inline-block; margin-top: 30px; color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--ink-2); padding: 10px 0 4px;
+      font-size: 17px; letter-spacing: .12em; }
+  a span { font-family: var(--latin); letter-spacing: .02em; font-size: 14px; color: var(--ink-2); margin-left: 8px; }
+  a:hover, a:focus-visible { border-bottom-color: var(--seal); outline: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>临安<i class="seal" aria-hidden="true">杭</i></h1>
+  <div class="track"></div>
+  <p>此页不存在<span>This page does not exist.</span></p>
+  <a href="/">回到临安<span>Back to Lin'an</span></a>
+</main>
+</body>
+</html>
