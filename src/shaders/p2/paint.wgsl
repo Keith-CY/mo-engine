@@ -549,7 +549,7 @@ fn brushLine(J: vec4u, fc: vec2f, idk: f32, fK: f32, grain: f32) -> vec2f {
   cov *= 1.0 - dry * smoothstep(0.4, 0.62, br);
   // brush lines on land and trees lighter than the 界画 of the buildings, fading out on the far masses
   let sc0 = clsOf(SA);
-  let lk = select(1.0, 0.7 * (1.0 - 0.7 * smoothstep(ridgeFrom * 0.4, ridgeFrom, depthOf(SA))), match_ && !isArch(sc0) && sc0 != C_FIGURE);
+  let lk = select(1.0, 0.7 * (1.0 - 0.7 * smoothstep(ridgeFrom * 0.4, ridgeFrom, depthOf(SA))), match_ && !isArch(sc0) && !isFig(sc0));
   // (a grey line that sits in the wash, not a pen's black: the 界画 keep a little more)
   let lineInk = select(0.78, 0.9, isArch(sc0)) * lk * cov * (0.75 + 0.35 * n2) * mix(1.0, select(0.5, 0.3, match_), smoothstep(near * 1.5, far * 0.5, depthOf(SA))) * select(mix(0.45, 1.0, idk), mix(0.75, 1.0, fK), fine);
   // 洇: the ink creeps a little into the fibres beside the line
@@ -728,7 +728,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (gLift) { plit = mix(plit, mix(plB, LL.y, 0.4), K.look5.w); }
   // (and in every look the ground, the grass, the paving and the carved figures carry no cast shadows: the references
   // paint none, and a wood's shadow on a path or a statue reads as camouflage blotches)
-  else if (match_ && !night && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE || cls == C_FIGURE)) { plit = mix(plB, LL.y, 0.4); }
+  else if (match_ && !night && (cls == C_GROUND || cls == C_SMALL || cls == C_PAVE || isFig(cls))) { plit = mix(plB, LL.y, 0.4); }
   let shade = 1.0 - plit;
   let farS = smoothstep(ridgeFrom * 0.5, ridgeFrom, D) * select(0.0, 1.0, isLand(cls) || isFol(cls) || cls == C_CITYFAR);
   tF = mix(tF, tB, farS * 0.5);
@@ -741,7 +741,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   // rock and ground: the value follows the light on the form, not the material's blotches
   if (isLand(cls) && hasN && !night) {
     var litT = select(0.15, 0.0, cls == C_ROCK) + 0.82 * smoothstep(0.3, 0.85, plit);
-    if (cls == C_FIGURE) { litT = 0.62 + 0.36 * smoothstep(0.1, 0.9, plit); }
+    if (isFig(cls)) { litT = 0.62 + 0.36 * smoothstep(0.1, 0.9, plit); }
     tone = mix(tone, mix(pow(clamp(tB * K.sh1.z, 0.0, 1.0), K.sh1.w), litT, select(0.8, mix(0.8, 1.0, K.look5.w), gLift)), 1.0 - smoothstep(ridgeFrom * 0.4, ridgeFrom, D));
   }
   let dark = 1.0 - tone;
@@ -838,7 +838,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
       // (the references' rock is the deepest ink in the picture after the pines: grey on the lit faces, near black in
       // the shaded ones and the clefts)
       rw = 0.26 + 0.38 * (1.0 - pv) + 0.22 * (mot - 0.5) + 0.1 * (mot2 - 0.5) + 0.14 * baseK + 0.32 * fis.y + 0.12 * fc2.x;
-      if (cls == C_NICHE) { rw = 0.3 + 0.12 * (1.0 - pv) + 0.1 * (mot - 0.5) + 0.12 * smoothstep(0.35, 0.05, tF); }
+      // (ink08's niche: a deep grey hollow, darkest at its back and under the arch, that sets the pale figure off)
+      if (cls == C_NICHE) { rw = 0.4 + 0.18 * (1.0 - pv) + 0.12 * (mot - 0.5) + 0.06 * (mot2 - 0.5) + 0.14 * smoothstep(0.35, 0.05, tF); }
       facetLine = max(fc2.y * 0.3, fis.x) * nearR * (0.6 + 0.4 * shade) * select(1.0, 0.35, cls == C_NICHE) * K.look2.x;
       // the face's own 皴: dry vertical streaks of the side brush, gathered in groups, deeper in shade
       let rq = vec2f(dot(P, camR), P.y);
@@ -849,7 +850,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     }
     w0 = mix(w0, rw, nearR);
   }
-  if (cls == C_FIGURE && !night) {
+  if (isFig(cls) && !night) {
     // the carving is the cliff's own grey stone (ink08): a pale grey on the lit belly and face, a mid grey turning
     // away and in shade, deep in the folds and the hollows, mottled by the weather — not paper with an outline
     let rimV = pow(1.0 - clamp(abs(dot(Nw, dirW)), 0.0, 1.0), 1.5);
@@ -857,7 +858,16 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let pv = smoothstep(-0.2, 0.8, 0.6 * dot(Nw, F.sun.xyz) + 0.4 * Nw.y);
     let mot = lodNoise(P * vec3f(1.0, 0.7, 1.0) + 41.0, fp * 60.0 * uK);
     let mot2 = lodNoise(P * 2.3 + 9.0, fp * 18.0 * uK);
-    w0 = mix(w0, 0.07 + 0.24 * (1.0 - pv) + 0.12 * rimV + 0.1 * (mot - 0.5) + 0.05 * (mot2 - 0.5), nearR);
+    // (the robe a mid grey over the pale skin, deeper in its folds: ink08 sets the bare belly and face off by it)
+    // (how much of the pixels round it are robe: the class steps along the mesh's triangles, its tone must not)
+    var rf = 0.0;
+    for (var k = 0; k < 8; k++) {
+      let a = f32(k) * 0.7854;
+      rf += select(0.0, 1.0, clsOf(texA(gp + vec2i(vec2f(cos(a), sin(a)) * 3.5 * uK))) == C_ROBE);
+    }
+    rf = (rf + select(0.0, 2.0, cls == C_ROBE)) / 10.0;
+    let robe = smoothstep(0.1, 0.9, rf) * (0.13 + 0.1 * (1.0 - pv));
+    w0 = mix(w0, 0.07 + 0.24 * (1.0 - pv) + 0.12 * rimV + 0.1 * (mot - 0.5) + 0.05 * (mot2 - 0.5) + robe, nearR);
   }
   // far ranges: pale washes keyed to their (small) contrast against the haze
   let farW = smoothstep(ridgeFrom * 0.5, ridgeFrom, D) * select(0.0, 1.0, isLand(cls) || isFol(cls) || cls == C_CITYFAR);
@@ -905,7 +915,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_ROOF || cls == C_CITYFAR) { mul *= K.look.z; }
   // aerial perspective: everything pales with distance (the paper shows through)
   if (cls != C_SKY) { mul *= mix(1.0, 0.5, smoothstep(near * 2.0, far * 1.2, D)); }
-  if (cls != C_SKY && cls != C_WATER && cls != C_FIGURE) { mul *= select(mix(select(0.55, 0.55, match_), 1.0, idk), mix(select(0.6, 0.62, match_), 1.0, idk), isArch(cls)); }
+  if (cls != C_SKY && cls != C_WATER && !isFig(cls)) { mul *= select(mix(select(0.55, 0.55, match_), 1.0, idk), mix(select(0.6, 0.62, match_), 1.0, idk), isArch(cls)); }
   // range behind range: each farther one paler
   if (isLand(cls) || isFol(cls)) { mul *= mix(1.0, 0.4, smoothstep(ridgeFrom * 1.5, ridgeFrom * 10.0, D)); }
   var w1 = w0 * mul * inkGain;
@@ -1097,11 +1107,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let layered = (fl + smoothstep(0.38, 0.62, fr)) / LAY;
   let rim = smoothstep(0.45, 0.6, fr) * (1.0 - smoothstep(0.6, 0.95, fr)) * step(0.0, fl) * step(0.02, w1);
   var wash = max(mix(w1, layered, select(select(0.5, 0.2, isFol(cls)), 0.25, isArch(cls))), 0.0)
-           + rim * K.st1.x / LAY * select(select(1.0, 0.0, isFol(cls) && cls != C_LOTUS), 0.3, cls == C_ROCK || cls == C_FIGURE);
+           + rim * K.st1.x / LAY * select(select(1.0, 0.0, isFol(cls) && cls != C_LOTUS), 0.3, cls == C_ROCK || isFig(cls));
   // a sky wash (and a roof plane) is laid flat, in one go
   if (cls == C_SKY || cls == C_LOTUS || cls == C_GLOW || (night && (isArch(cls) || isLand(cls) || isFol(cls)))
       || (cls == C_WATER && (night || paperLift > 0.5 || K.look5.x > 0.0 || K.waterRefl.y > 0.0)) || cls == C_ROOF || cls == C_CITYFAR
-      || ((cls == C_ROCK || cls == C_NICHE || cls == C_FIGURE) && nearR > 0.5) || (cls == C_PAVE && match_)) { wash = w1; }
+      || ((cls == C_ROCK || cls == C_NICHE || isFig(cls)) && nearR > 0.5) || (cls == C_PAVE && match_)) { wash = w1; }
 
   // far ranges: dark at the ridge, fading downward into mist (留白)
   let farK = smoothstep(ridgeFrom * 0.7, ridgeFrom * 1.4, D) * select(0.0, 1.0, uRidge > 0.0 && cls != C_SKY && cls != C_WATER);
@@ -1157,8 +1167,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
     if (cls == C_ROCK) { dens = min(dens * 1.7, 0.95); }
     dens *= 1.0 - smoothstep(0.86, 0.97, tone);
     dens *= 1.0 - smoothstep(cunFar * 0.45, cunFar, D);
-    let kind = select(0.0, 1.0, cls == C_ROCK || cls == C_FIGURE || K.st2.w > 0.5);
-    if (dens > 0.01 && cls != C_FIGURE) { cunInk = cunStrokes(P, Nw, fp, dens, kind) * 0.85; }
+    let kind = select(0.0, 1.0, cls == C_ROCK || isFig(cls) || K.st2.w > 0.5);
+    if (dens > 0.01 && !isFig(cls)) { cunInk = cunStrokes(P, Nw, fp, dens, kind) * 0.85; }
     cunInk *= select(mix(1.0, 0.25, farK), 1.0 - farW, match_);
     if (cls == C_ROCK || cls == C_NICHE) { cunInk *= K.look2.x * select(1.0, 0.55, match_); }
   }
@@ -1453,7 +1463,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     var kk = 0.4;
     if (cls == C_PAVE) { kk = 0.35; } else if (cls == C_ROOF || cls == C_CITYFAR) { kk = select(0.75, 0.15, match_); }
     else if (isArch(cls)) { kk = 1.0; } else if (isTree(cls)) { kk = select(0.8, 0.12, match_); } else if (cls == C_LOTUS) { kk = 0.15; }
-    else if (cls == C_ROCK || cls == C_NICHE) { kk = select(0.5, 0.12, match_) * K.look2.x; } else if (cls == C_FIGURE) { kk = select(0.4, 0.2, match_); }
+    else if (cls == C_ROCK || cls == C_NICHE) { kk = select(0.5, 0.12, match_) * K.look2.x; } else if (isFig(cls)) { kk = select(0.4, 0.2, match_); }
     else if (cls == C_GROUND) { kk = 0.6; }
     let lo = select(select(0.015, 0.005, fineK), select(0.03, 0.06, cls == C_PAVE), cls == C_GROUND || cls == C_PAVE);
     var det = 1.25 * clamp((hp - lo) / select(0.2, 0.16, fineK), 0.0, 0.8) * kk * select(K.look.x, 1.0, cls == C_PAVE) * mix(0.55, 1.0, idk) * mix(1.0, 0.3, smoothstep(far * 0.3, far, D));

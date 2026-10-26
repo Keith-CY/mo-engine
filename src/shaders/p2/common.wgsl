@@ -50,12 +50,14 @@ const C_WALL = 6u; const C_STONE = 7u; const C_PINE = 8u; const C_WILLOW = 9u; c
 const C_FIGURE = 12u; const C_GLOW = 13u; const C_BOAT = 14u; const C_SMALL = 15u; const C_BLOSSOM = 16u;
 const C_WAVE = 17u; const C_MAPLE = 18u; const C_CITYFAR = 19u; const C_SNOW = 20u; const C_DARK = 21u;
 const C_METAL = 22u; const C_GINKGO = 23u; const C_LOTUS = 24u; const C_NICHE = 25u; const C_IVY = 26u;
-const C_PAVE = 27u; const C_BLOOM = 28u;
+const C_PAVE = 27u; const C_BLOOM = 28u; const C_ROBE = 29u;
 
 fn isFol(c: u32) -> bool { return c == C_LOTUS || c == C_PINE || c == C_WILLOW || c == C_BROAD || c == C_MAPLE || c == C_GINKGO || c == C_BLOSSOM || c == C_SMALL || c == C_IVY; }
 fn isTree(c: u32) -> bool { return c == C_PINE || c == C_WILLOW || c == C_BROAD || c == C_MAPLE || c == C_GINKGO || c == C_BLOSSOM; }
 fn isArch(c: u32) -> bool { return c == C_ROOF || c == C_WOOD || c == C_WALL || c == C_STONE || c == C_GLOW || c == C_BOAT || c == C_CITYFAR || c == C_SNOW || c == C_DARK || c == C_METAL; }
-fn isLand(c: u32) -> bool { return c == C_GROUND || c == C_ROCK || c == C_FIGURE || c == C_NICHE; }
+/** the carving: its bare stone (FIGURE) and its robe (ROBE, painted a little deeper with its folds drawn) */
+fn isFig(c: u32) -> bool { return c == C_FIGURE || c == C_ROBE; }
+fn isLand(c: u32) -> bool { return c == C_GROUND || c == C_ROCK || isFig(c) || c == C_NICHE; }
 
 fn lum(c: vec3f) -> f32 { return dot(c, vec3f(0.2126, 0.7152, 0.0722)); }
 fn h33(p: vec3i) -> vec3f { return vec3f(pcg3(bitcast<vec3u>(p)) & vec3u(0xffffffu)) / 16777215.0; }

@@ -112,6 +112,8 @@ export const DEFAULT_STYLE: InkStyle = {
     [CLS.ROCK]: { wash: [0.1, 0.55, 1.2, 0.3], line: [0.55, 0.15, 0.75, 1.6], marks: [0.8, 6, MARK.ROCK], haze: 2.2 },
     // the carving in the cliff: a clean, fine drawn line (白描) on its silhouette and every fold; the niche's rim like rock
     [CLS.FIGURE]: { wash: [0.02, 0.1, 1.5, 0.1], line: [0.9, 0.6, 0.12, 0.6], marks: [0, 6, MARK.NONE] },
+    // (the carving's robe: as the figure, a little deeper, its folds drawn)
+    [CLS.ROBE]: { wash: [0.12, 0.2, 1.4, 0.15], line: [0.9, 0.7, 0.1, 0.7], marks: [0, 6, MARK.NONE] },
     [CLS.NICHE]: { wash: [0.25, 0.3, 1.2, 0.2], line: [0.8, 0.3, 0.5, 1.1], marks: [0, 6, MARK.NONE], haze: 2.2 },
     [CLS.WATER]: { wash: [0.0, 0.05, 2.0, 0.1], line: [0, 0, 0.3, 1.0], marks: [0.0, 14, MARK.NONE] },
     // architecture: pale washes, the contours and joints drawn (界画)

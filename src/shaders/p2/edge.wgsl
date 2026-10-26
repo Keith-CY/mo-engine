@@ -28,7 +28,8 @@ fn classLine(c: u32) -> array<f32, 5> {
   if (c == C_CITYFAR) { r[0] = 0.32; r[1] = 0.08; r[3] = 0.4; }
   if (c == C_GROUND) { r = array<f32, 5>(0.07, 0.0, r[2], 1.0, 2.0); }
   if (c == C_ROCK) { r = array<f32, 5>(0.4, 0.15, 0.75, 1.2, 3.0); }
-  if (c == C_FIGURE) { r = array<f32, 5>(0.6, 0.45, 0.12, 0.42, 4.0); }   // (a fine grey contour: the stone is modelled in tone)
+  if (isFig(c)) { r = array<f32, 5>(0.6, 0.45, 0.12, 0.42, 4.0); }   // (a fine grey contour: the stone is modelled in tone)
+  if (c == C_ROBE) { r = array<f32, 5>(0.65, 0.7, 0.07, 0.5, 4.0); }   // (the robe's folds drawn, as ink08 draws them)
   if (c == C_NICHE) { r = array<f32, 5>(0.8, 0.3, 0.5, 1.1, 3.0); }
   if (c == C_BARK) { r = array<f32, 5>(0.8, 0.1, 0.6, 1.1, r[4]); }
   if (isTree(c)) { r[0] = 0.06; r[3] = 0.6; r[4] = 2.0; }
@@ -95,6 +96,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
       if ((c == C_GROUND && cb == C_SMALL) || (c == C_SMALL && cb == C_GROUND)) { cl *= 0.15; }
       if (c == C_GROUND && isTree(cb)) { cl *= 0.4; }
       if (isArch(c) && isArch(cb)) { cl *= 0.8; }
+      // (the robe's edge over the bare stone: its tone tells it, a line along the mesh's triangles would be stepped)
+      if (isFig(c) && isFig(cb)) { cl = 0.0; }
       // (a hill, a wood or a rock against the sky is a soft edge of wash, hardly a line: the references draw no contour)
       if (cb == C_SKY) { cl = select(select(1.0, 0.45, c == C_ROCK), 0.15, fol || c == C_GROUND); }
     }
@@ -123,8 +126,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
       }
       if (nn > 3.0) {
         avg /= nn;
-        let w = select(select(select(0.5, 0.35, c == C_ROCK), 0.6, c == C_FIGURE), 0.0, c == C_GROUND || c == C_PAVE);
-        s = max(s, smoothstep(select(0.45, 0.25, c == C_FIGURE), select(0.75, 0.55, c == C_FIGURE), (avg - sk) / max(avg, 1e-4)) * w);
+        let w = select(select(select(0.5, 0.35, c == C_ROCK), 0.6, isFig(c)), 0.0, c == C_GROUND || c == C_PAVE);
+        s = max(s, smoothstep(select(0.45, 0.25, isFig(c)), select(0.75, 0.55, isFig(c)), (avg - sk) / max(avg, 1e-4)) * w);
       }
     }
   }

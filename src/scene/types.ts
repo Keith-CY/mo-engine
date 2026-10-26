@@ -166,7 +166,7 @@ export const VCLASS_PAVE_BLEND = 0x20000;
 export const CLS = {
   SKY: 0, GROUND: 1, ROCK: 2, WATER: 3, ROOF: 4, WOOD: 5, WALL: 6, STONE: 7, PINE: 8, WILLOW: 9, BROAD: 10,
   BARK: 11, FIGURE: 12, GLOW: 13, BOAT: 14, SMALL: 15, BLOSSOM: 16, WAVE: 17, MAPLE: 18, CITYFAR: 19, SNOW: 20,
-  DARK: 21, METAL: 22, GINKGO: 23, LOTUS: 24, NICHE: 25, IVY: 26, PAVE: 27, BLOOM: 28,
+  DARK: 21, METAL: 22, GINKGO: 23, LOTUS: 24, NICHE: 25, IVY: 26, PAVE: 27, BLOOM: 28, ROBE: 29,
 } as const;
 
 /** writes one instance record: a 3 × 4 affine transform by columns (X axis, Y axis, Z axis, translation) */
