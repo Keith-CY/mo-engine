@@ -550,10 +550,11 @@ fn brushLine(J: vec4u, fc: vec2f, idk: f32, fK: f32, grain: f32) -> vec2f {
   // brush lines on land and trees lighter than the 界画 of the buildings, fading out on the far masses
   let sc0 = clsOf(SA);
   let lk = select(1.0, 0.7 * (1.0 - 0.7 * smoothstep(ridgeFrom * 0.4, ridgeFrom, depthOf(SA))), match_ && !isArch(sc0) && sc0 != C_FIGURE);
-  let lineInk = lk * cov * (0.75 + 0.35 * n2) * mix(1.0, select(0.5, 0.3, match_), smoothstep(near * 1.5, far * 0.5, depthOf(SA))) * select(mix(0.45, 1.0, idk), mix(0.75, 1.0, fK), fine);
+  // (a grey line that sits in the wash, not a pen's black: the 界画 keep a little more)
+  let lineInk = select(0.78, 0.9, isArch(sc0)) * lk * cov * (0.75 + 0.35 * n2) * mix(1.0, select(0.5, 0.3, match_), smoothstep(near * 1.5, far * 0.5, depthOf(SA))) * select(mix(0.45, 1.0, idk), mix(0.75, 1.0, fK), fine);
   // 洇: the ink creeps a little into the fibres beside the line
   var bleed = 0.0;
-  if (d > w) { bleed = lk * exp(-(d - w) / (1.3 * uK)) * 0.22 * E.x * pressure * (0.4 + grain); }
+  if (d > w) { bleed = lk * exp(-(d - w) / ((1.3 + 1.6 * n1) * uK)) * 0.32 * E.x * pressure * (0.4 + grain); }
   return vec2f(lineInk, bleed);
 }
 

@@ -4,7 +4,7 @@
 //   1 – 0  places · T  next time · M  the menu · F  walk / fly · W A S D or arrows, Shift, Space / E, C / Q · drag or
 //   double-click to look · H  the HUD; touch: a stick on the left, look on the right, up / down buttons while flying
 // ?vp= (or linan's ?at=) the first place (default 2) · ?fps=1 the frame rate · ?menu=1 the menu open · ?ui=0 none · ?adaptive=1 the
-// render scale follows the frame rate under automation too · ?scale=, ?p2dbg=, ?hud=1 as the demo's
+// render scale follows the frame rate under automation too · ?scale=, ?p2dbg=, ?wet=strength,reach,soft, ?hud=1 as the demo's
 import { Engine, loadMoScene, NoWebGPU, type Viewpoint } from '../../src/index';
 import { mountWatermark } from './watermark';
 
@@ -170,6 +170,7 @@ async function main(): Promise<void> {
   if (navigator.webdriver && P.get('adaptive') !== '1') engine.adaptive = false;
   if (P.get('scale')) { engine.adaptive = false; engine.renderScale = Number(P.get('scale')); engine.resize(); }
   if (P.get('p2dbg')) engine.renderer.p2.debug = Number(P.get('p2dbg'));
+  if (P.get('wet')) { const [st, re, so] = P.get('wet')!.split(',').map(Number); Object.assign(engine.renderer.p2.wet, { strength: st, ...(re ? { reach: re } : {}), ...(so >= 0 ? { soft: so } : {}) }); }
   // every level-of-detail distance at 0.8 (a fifth fewer triangles where the woods are thick, as at 飞来峰, with no
   // difference the painting shows); ?lod= another scale
   engine.renderer.lodScale = Number(P.get('lod') ?? 0.8);

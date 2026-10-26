@@ -2,7 +2,7 @@
  * Painter 2, the still-match painter: linan's painter (the one that made the approved stills) ported pass for pass
  * onto Mo's G-buffer (src/shaders/p2/). Passes, each a full-screen triangle:
  *   tone (full) → ½ blur and ⅛ broad blur · light (½, blurred; ⅛ broad) · edges → jump flood (7 jumps) · ridge (full)
- *   → paint (into the painting target the temporal resolve reads)
+ *   → paint → wet (the ink's creep into the damp paper, into the painting target the temporal resolve reads)
  * It reads the look's ink settings as linan's shots give them (scene looks[].ink) and the 纯水墨 style.
  */
 import FRAME from '../shaders/frame.wgsl';
@@ -14,6 +14,7 @@ import EDGE from '../shaders/p2/edge.wgsl';
 import JFA from '../shaders/p2/jfa.wgsl';
 import RIDGE from '../shaders/p2/ridge.wgsl';
 import PAINT from '../shaders/p2/paint.wgsl';
+import WET from '../shaders/p2/wet.wgsl';
 
 /** linan's shot defaults (src/ink/styles.js SHOT) */
 const SHOT: Record<string, unknown> = { near: 40, far: 2600, cunFar: 3500, mi: 900, ridge: 70, ridgeFrom: 900, tone: [1, 1], sky: 0, water: 0.08, waves: 0.25, waveMode: 0, warm: 0, night: 0 };
@@ -30,15 +31,16 @@ interface P2Targets {
   w: number; h: number;
   half: GPUTexture[]; quarter: GPUTexture; eighth: GPUTexture[];
   light: GPUTexture[]; lightQ: GPUTexture; lightE: GPUTexture[];
-  edge: GPUTexture; jfa: GPUTexture[]; ridge: GPUTexture;
+  edge: GPUTexture; jfa: GPUTexture[]; ridge: GPUTexture; painted: GPUTexture;
   passes: { label: string; stage: string; pipe: GPURenderPipeline; bg: GPUBindGroup; view: GPUTextureView }[];
   /** which JFA texture holds the result */
   jfaOut: number;
 }
 
 export class Painter2 {
-  private pipes!: { tone: GPURenderPipeline; blur: GPURenderPipeline; light: GPURenderPipeline; edge: GPURenderPipeline; jfa: GPURenderPipeline; ridge: GPURenderPipeline; paint: GPURenderPipeline };
+  private pipes!: { tone: GPURenderPipeline; blur: GPURenderPipeline; light: GPURenderPipeline; edge: GPURenderPipeline; jfa: GPURenderPipeline; ridge: GPURenderPipeline; paint: GPURenderPipeline; wet: GPURenderPipeline };
   private readonly inkBuf: GPUBuffer;
+  private readonly wetBuf: GPUBuffer;
   private readonly data = new Float32Array(INK_FLOATS);
   private targets?: P2Targets;
   private readonly sampler: GPUSampler;
@@ -52,6 +54,8 @@ export class Painter2 {
   skip = new Set<string>();
   /** parts of the painting left out (benchmarks, bits): 1 lines, 2 dark detail, 4 ground patches, 8 leaf marks, 32 皴 */
   benchFlags = 0;
+  /** the wet paper: how strongly the ink creeps (0 off), its reach (px at 1664 across), how far hard edges soften */
+  wet = { strength: 1, reach: 9, soft: 0.15 };
   /** parts of the painting compiled in (benchmarks: reinit() after a change) */
   features = { ground: true, leaf: true, lines: true, detail: true, cun: true, rock: true, water: true };
   /** compiles the passes again (after `features` change) */
@@ -59,6 +63,7 @@ export class Painter2 {
 
   constructor(private readonly device: GPUDevice) {
     this.inkBuf = device.createBuffer({ label: 'mo p2 ink', size: INK_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.wetBuf = device.createBuffer({ label: 'mo p2 wet', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
   }
 
@@ -70,19 +75,19 @@ export class Painter2 {
       const m = d.createShaderModule({ label, code: common ? `${FRAME}\n${COMMON}\n${consts}\n${code}` : code });
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     };
-    const [tone, blur, light, edge, jfa, ridge, paint] = await Promise.all([
+    const [tone, blur, light, edge, jfa, ridge, paint, wet] = await Promise.all([
       mk('mo p2 tone', TONE_PASS, 'rgba16float'), mk('mo p2 blur', BLUR, 'rgba16float', false), mk('mo p2 light', LIGHT, 'rgba16float'),
       mk('mo p2 edge', EDGE, 'rgba16float'), mk('mo p2 jfa', JFA, 'rgba32uint', false), mk('mo p2 ridge', RIDGE, 'rgba16float'),
-      mk('mo p2 paint', PAINT, 'rgba16float'),
+      mk('mo p2 paint', PAINT, 'rgba16float'), mk('mo p2 wet', WET, 'rgba16float'),
     ]);
-    this.pipes = { tone, blur, light, edge, jfa, ridge, paint };
+    this.pipes = { tone, blur, light, edge, jfa, ridge, paint, wet };
   }
 
   /** the targets and every pass's bind group, for this size and these G-buffer textures */
   private ensure(w: number, h: number, g: { a: GPUTexture; b: GPUTexture; c: GPUTexture; frame: GPUBuffer; inst: GPUBuffer }, out: GPUTexture): P2Targets {
     const key = this.targets;
     if (key && key.w === w && key.h === h && this.boundTo === g.a && this.boundOut === out && this.boundInst === g.inst) return key;
-    if (key) for (const t of [...key.half, key.quarter, ...key.eighth, ...key.light, key.lightQ, ...key.lightE, key.edge, ...key.jfa, key.ridge]) t.destroy();
+    if (key) for (const t of [...key.half, key.quarter, ...key.eighth, ...key.light, key.lightQ, ...key.lightE, key.edge, ...key.jfa, key.ridge, key.painted]) t.destroy();
     const d = this.device;
     const tex = (label: string, tw: number, th: number, format: GPUTextureFormat = 'rgba16float') =>
       d.createTexture({ label, size: [Math.max(1, tw), Math.max(1, th)], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
@@ -94,6 +99,7 @@ export class Painter2 {
       light: [tex('mo p2 light 0', W2, H2), tex('mo p2 light 1', W2, H2)], lightQ: tex('mo p2 light q', W4, H4),
       lightE: [tex('mo p2 light e0', W8, H8), tex('mo p2 light e1', W8, H8)],
       edge: tex('mo p2 edge', w, h), jfa: [tex('mo p2 jfa 0', w, h, 'rgba32uint'), tex('mo p2 jfa 1', w, h, 'rgba32uint')], ridge: tex('mo p2 ridge', W2, H2),
+      painted: tex('mo p2 painted', w, h),
       passes: [], jfaOut: 0,
     };
     const P = this.pipes;
@@ -143,7 +149,10 @@ export class Painter2 {
     // the painting
     stage = 'paint';
     pass('p2 paint', P.paint, [...fi, g.a.createView(), g.b.createView(), g.c.createView(), t.half[0].createView(), t.eighth[0].createView(),
-      t.edge.createView(), t.jfa[t.jfaOut].createView(), t.ridge.createView(), t.light[0].createView(), t.lightE[0].createView(), this.sampler, { buffer: g.inst }], out);
+      t.edge.createView(), t.jfa[t.jfaOut].createView(), t.ridge.createView(), t.light[0].createView(), t.lightE[0].createView(), this.sampler, { buffer: g.inst }], t.painted);
+    // the ink creeps into the damp paper
+    stage = 'wet';
+    pass('p2 wet', P.wet, [{ buffer: g.frame }, { buffer: this.wetBuf }, g.a.createView(), t.painted.createView(), this.sampler], out);
     this.targets = t;
     this.boundTo = g.a; this.boundOut = out; this.boundInst = g.inst;
     return t;
@@ -208,6 +217,8 @@ export class Painter2 {
     if (vals.length !== INK_FLOATS) throw new Error(`[mo p2] ${vals.length} uniform floats, not ${INK_FLOATS}`);
     f.set(vals);
     this.device.queue.writeBuffer(this.inkBuf, 0, f);
+    const wt = this.wet;
+    this.device.queue.writeBuffer(this.wetBuf, 0, new Float32Array([this.debug ? 0 : wt.strength, wt.reach, wt.soft, night || num('night', 0) ? 1 : 0]));
   }
 
   /** records the painter's passes: the G-buffer in, the painting out */
