@@ -867,7 +867,21 @@ fn fs(v: VOut) -> @location(0) vec4f {
     }
     rf = (rf + select(0.0, 2.0, cls == C_ROBE)) / 10.0;
     let robe = smoothstep(0.1, 0.9, rf) * (0.13 + 0.1 * (1.0 - pv));
-    w0 = mix(w0, 0.07 + 0.24 * (1.0 - pv) + 0.12 * rimV + 0.1 * (mot - 0.5) + 0.05 * (mot2 - 0.5) + robe, nearR);
+    // (the hollows — the open mouth, the eyes' slits, under the chin — go dark as ink08 lays them: a pixel lying
+    // deeper than the carving round it is in a hollow; a silhouette's ring holds the deeper niche, so it reads none)
+    // (deeper than the stone on both sides along some direction: across a silhouette's rim one side is the niche
+    // beyond, along it the rim keeps its depth, so it reads none)
+    let rr = clamp(0.22 / max(fp, 1e-4), 3.0, 80.0);   // (a span ~0.22 m: the mouth's height, in pixels here)
+    var rec = -1e9;
+    for (var k = 0; k < 4; k++) {
+      let a = f32(k) * 0.7854 + 0.39;
+      let o = vec2i(vec2f(cos(a), sin(a)) * rr);
+      let q1 = texA(gp + o); let q2 = texA(gp - o);
+      let d1 = select(D, depthOf(q1), isFig(clsOf(q1))); let d2 = select(D, depthOf(q2), isFig(clsOf(q2)));
+      rec = max(rec, D - max(d1, d2));
+    }
+    let occ = smoothstep(0.03, 0.12, rec);
+    w0 = mix(w0, 0.07 + 0.24 * (1.0 - pv) + 0.12 * rimV + 0.1 * (mot - 0.5) + 0.05 * (mot2 - 0.5) + robe + 0.55 * occ, nearR);
   }
   // far ranges: pale washes keyed to their (small) contrast against the haze
   let farW = smoothstep(ridgeFrom * 0.5, ridgeFrom, D) * select(0.0, 1.0, isLand(cls) || isFol(cls) || cls == C_CITYFAR);
