@@ -34,7 +34,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let wet = smoothstep(0.2, 0.8, 0.65 * vnoise(q * 28.0 + 3.7) + 0.35 * vnoise(q * 95.0 + 11.0));
   // the fibres: a hairy fringe, the creep running farther along some than others
   let fib = 0.6 * vnoise(q * vec3f(380.0, 1500.0, 380.0)) + 0.4 * vnoise(q * vec3f(1400.0, 520.0, 1400.0) + 5.0);
-  let reach = W.p.y * uK * (0.55 + 0.9 * wet);
+  let reach = W.p.y * uK * (0.8 + 0.4 * wet);
   // a spiral of samples, its turn set by the paper (an even disc, no screen pattern that would crawl)
   let rot = vnoise(q * 700.0) * 6.2832;
   var creep = 0.0;
@@ -59,11 +59,12 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let night = W.p.w > 0.5;
   let k = W.p.x * select(1.0, 0.35, night);
   // the halo: a pale bloom of the neighbour's ink, broken by the fibre
-  // (only where the paper was damp: the dry patches keep a crisp edge and their white gaps, as a painting has both)
-  let halo = creep * k * 0.7 * smoothstep(0.15, 0.65, wet);
+  // (a little everywhere, a little more where the paper was damp: only the lines and the edges of the washes soften,
+  // the masses and the white gaps keep their tone)
+  let halo = creep * k * 0.5 * (0.7 + 0.3 * wet);
   var c = c0.rgb * max(1.0 - halo / max(L0, 0.04), 0.0);
   // the soft edge: where tones meet, the wet side runs into the other
   let edge = smoothstep(0.02, 0.18, abs(lum(avg) - L0));
-  c = mix(c, avg, clamp(W.p.z * k * firm * smoothstep(0.1, 0.7, wet) * edge, 0.0, 0.85));
+  c = mix(c, avg, clamp(W.p.z * k * firm * (0.7 + 0.3 * wet) * edge, 0.0, 0.85));
   return vec4f(c, c0.a);
 }

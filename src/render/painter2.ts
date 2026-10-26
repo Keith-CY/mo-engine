@@ -55,7 +55,7 @@ export class Painter2 {
   /** parts of the painting left out (benchmarks, bits): 1 lines, 2 dark detail, 4 ground patches, 8 leaf marks, 32 皴 */
   benchFlags = 0;
   /** the wet paper: how strongly the ink creeps (0 off), its reach (px at 1664 across), how far hard edges soften */
-  wet = { strength: 1, reach: 9, soft: 0.15 };
+  wet = { strength: 1, reach: 4.5, soft: 0.2 };
   /** parts of the painting compiled in (benchmarks: reinit() after a change) */
   features = { ground: true, leaf: true, lines: true, detail: true, cun: true, rock: true, water: true };
   /** compiles the passes again (after `features` change) */
