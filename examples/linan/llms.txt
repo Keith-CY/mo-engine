@@ -1,0 +1,30 @@
+# 临安 · Hangzhou (linan.lapla.si)
+
+> Southern Song Hangzhou, walkable and painted as Chinese ink, drawn entirely in code (the Mo engine, WebGPU).
+
+Lin'an (临安) was the capital of the Southern Song, today's Hangzhou. linan.lapla.si is the city and West Lake as a 3D world you walk or fly through in the browser, painted in Chinese ink (纯水墨). Every mesh, brush stroke and texture is generated in code: there are no downloaded models, scans, textures or fonts, and the timber buildings follow the rules of the Song building manual 《营造法式》 (1103). It needs desktop Chrome, Edge or Safari with WebGPU; the city loads about 114 MiB at the start and fetches finer buildings as you come near. Walk with WASD and look with the mouse; the menu switches places, times of day and seasons, and walking or flying.
+
+## The world
+- [临安 · Hangzhou](https://linan.lapla.si/): the walkable ink-painted city and West Lake
+
+## Viewpoints
+- 西湖全景 · West Lake from Baoshi Hill
+- 苏堤春晓 · Su Causeway at Dawn
+- 曲院风荷 · Lotus at Quyuan
+- 雷峰夕照 · Leifeng Pagoda at Sunset
+- 三潭印月 · Three Pools Mirroring the Moon
+- 南宋皇城 · The Imperial Palace
+- 临安御街 · The Imperial Way
+- 飞来峰 · Feilai Peak and Lingyin
+- 六和塔 · Liuhe Pagoda and the Tide
+- 断桥残雪 · Broken Bridge in Snow
+
+## Times of day and seasons
+- 春晓 Spring dawn, 夏午 Summer noon, 夕照 Sunset, 月夜 Moonlit night, 秋 Autumn, 冬雪 Winter snow
+
+## Source code (MIT)
+- [Keith-CY/linan](https://github.com/Keith-CY/linan): the world's generators (the 《营造法式》 architecture generator, pagodas, the palace and the city, 飞来峰, West Lake and the Qiantang tidal bore, plants and countryside) and its original three.js renderer, with videos of the tour
+- [Keith-CY/mo-engine](https://github.com/Keith-CY/mo-engine): Mo (墨), the WebGPU engine in TypeScript that renders and paints the live site
+
+## Optional
+- [lapla.si](https://lapla.si/): the lab that makes it

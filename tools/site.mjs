@@ -43,6 +43,9 @@ if (PAGE === 'demo') html = html.replace('<script type="module"',
   `if (!q.get('vp') && '${vp}') q.set('vp', '${vp}'); history.replaceState(null, '', '?' + q); } }</script>\n<script type="module"`);
 else html = html.replace('</head>', `<meta name="mo-scene" content="scenes/${first}/">\n</head>`);
 fs.writeFileSync(path.join(OUT, 'index.html'), html);
+// The page's /llms.txt (llmstxt.org), when it has one (examples/linan/llms.txt).
+const llms = path.join(ROOT, `examples/${PAGE}/llms.txt`);
+if (fs.existsSync(llms)) fs.copyFileSync(llms, path.join(OUT, 'llms.txt'));
 let files = 2, bytes = 0;
 for (const [k, dir] of scenes.entries()) {
   const src = fs.realpathSync(dir), dst = path.join(OUT, 'scenes', names[k]);
