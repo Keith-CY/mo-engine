@@ -1,5 +1,7 @@
 # Mo (墨)
 
+![临安 in Mo: 西湖全景, West Lake from Baoshi Hill, painted live in the browser](docs/img/hero.jpg)
+
 A WebGPU engine, in TypeScript, for walkable worlds painted as Chinese ink. Its first world is 临安, exported from
 [Keith-CY/linan](https://github.com/Keith-CY/linan): walk it at https://linan.lapla.si (`examples/linan`, linan's
 interface over Mo; the city is 191 MiB packed, 114 MiB of it at the start, each building's finer levels fetched as you
@@ -10,6 +12,13 @@ Two painters turn the G-buffer into ink. Painter 2 (the default, `src/render/pai
 one that made its approved stills, ported pass for pass: a tone from albedo × light with each look's levels baked at
 its viewpoint, its ½ and ⅛ blurs, the light on the form, brush outlines through a jump flood, where each pixel sits in
 its mass, and the washes, marks and lines of 纯水墨. Painter 1 (`?p2=0`) is Mo's first, one pass.
+
+![Walking 苏堤 through a bridge's arch, captured with tools/capture.mjs](docs/img/walk.webp)
+
+The ten viewpoints of 临安 (keys 1 … 9 and 0 in the demo), as Painter 2 renders them. Top row: 西湖全景, 苏堤春晓,
+曲院风荷, 雷峰夕照, 三潭印月; bottom row: 南宋皇城, 临安御街, 飞来峰, 六和塔, 断桥残雪.
+
+![临安's ten viewpoints](docs/img/views.jpg)
 
 ```
 npm run build      # dist/ (ES modules)
