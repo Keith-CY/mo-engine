@@ -33,11 +33,13 @@ const TIMES = [
 const NIGHT_LOOK = 5;
 /** linan's looks restyled toward the reference paintings the owner picked (Keith-CY/linan refs/ink01–10), over the
  *  settings its stills were painted with: a bluer summer sky and more heaps of cloud, the sunset's lake pale with the
- *  woods dark in it (not a dark wash), its woods veiled only high up, the bore's sky full of cumulus */
+ *  woods dark in it (not a dark wash), its woods veiled only high up, its shore willows mid-grey among them (not pale
+ *  sheets) and its far hill one even mass (graded from its ridge, the crowns along its rim read as a pale ring), the
+ *  bore's sky full of cumulus */
 const REF_INK: Record<number, Record<string, unknown>> = {
   1: { bands: [[330, 210, 0.35, 48], [3700, 900, 0.95, 70], [9000, 4500, 0.9, 300]] },
   3: { skyTint: [0.95, 0.55, 0.28, 0.8], clouds: 0.28, haze: 260 },
-  4: { water: 0.12, veil: [40, 90, 0.5], leaf: 0.8, haze: 700 },
+  4: { water: 0.12, veil: [40, 90, 0.5], leaf: 0.8, haze: 700, willows: 0.8, ridgeFrom: 2400 },
   6: { veil: [68, 100, 0.35], mist: [5, 34, 140, 0.4], walls: 2 },
   7: { roofs: 1.35, patch: [60, 0.35] },
   9: { clouds: 0.75, roofs: 0.72, detail: 0.65 },

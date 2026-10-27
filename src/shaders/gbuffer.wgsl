@@ -91,13 +91,23 @@ fn billboardShape(shape: u32, q: vec2f, seed: f32) -> vec2f {
     // threads of different lengths with the light between them — not a dome over an even curtain, which read as a heart)
     let lean = (seed - 0.5) * 0.25 * v;
     let uu = u - lean;
-    let d = length(vec2f(uu / 1.05, (v - 0.76) / 0.24));
-    let e = 0.9 + 0.25 * (n - 0.5);
-    let cq = (uu + 1.0) * 10.0;
+    // (the crown a few lumps of their own heights: one oval over the comb read as a flat-topped box, a fence along a
+    // shore of them, ink04)
+    var d = 1e3;
+    for (var i = 0; i < 3; i++) {
+      let fi = f32(i);
+      let hl = hash3(vec3i(i, i32(seed * 997.0), 53));
+      let c = vec2f((fi - 1.0) * 0.55 + 0.16 * (hl - 0.5), 0.74 + 0.12 * hl - 0.07 * abs(fi - 1.0));
+      d = min(d, length(vec2f((uu - c.x) / (0.48 + 0.12 * hl), (v - c.y) / (0.17 + 0.07 * hl))));
+    }
+    let e = 0.95 + 0.3 * (n - 0.5) + 0.12 * (n2 - 0.5);
+    // (the curtain one drooping mass, shorter toward the sides, its hem ragged lock by lock with a little light between
+    // the locks: thin threads with wide gaps read as pale pillars under a table)
+    let cq = (uu + 1.0) * 10.0 + 0.12 * sin(v * 7.0 + seed * 5.0);
     let hc = hash3(vec3i(i32(floor(cq)), i32(seed * 997.0), 41));
-    let hem = 0.06 + 0.46 * hc * hc + 0.06 * (n - 0.5);
-    let strand = step(abs(fract(cq) - 0.5), 0.3 + 0.12 * hc);
-    let curtain = step(abs(uu), 0.95 + 0.08 * (n - 0.5)) * step(hem, v) * step(v, 0.8) * strand;
+    let hem = 0.04 + 0.3 * hc * hc + 0.32 * uu * uu + 0.06 * (n - 0.5);
+    let strand = step(abs(fract(cq) - 0.5), 0.32 + 0.14 * hc);
+    let curtain = step(abs(uu), 0.92 + 0.12 * (n - 0.5)) * step(hem, v) * step(v, 0.8) * strand;
     a = max(max(step(d, e), curtain), step(abs(uu + 0.04 * sin(v * 6.0 + seed * 9.0)), 0.055) * step(v, 0.6));
     dark = smoothstep(0.65, 0.2, v) * 0.5;
   } else if (shape == 3u) {

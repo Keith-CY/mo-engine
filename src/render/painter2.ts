@@ -206,7 +206,7 @@ export class Painter2 {
       ...arr('mist', 4, [0, 0, 0, 0]),
       ...(bands[0] ?? [0, 0, 0, 0]), ...(bands[1] ?? [0, 0, 0, 0]), ...(bands[2] ?? [0, 0, 0, 0]),
       ...arr('patch', 2, [0, 0]), 0, 0,
-      ...arr('tint', 3, [1, 1, 1]), 0,
+      ...arr('tint', 3, [1, 1, 1]), num('willows', 0),
       ...arr('skyTint', 4, [0, 0, 0, 0]),
       ...arr('moonCol', 4, [0, 0, 0, 0]),
       ...arr('waterRefl', 2, [1, 0]), 0, 0,

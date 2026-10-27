@@ -504,7 +504,9 @@ fn focusOf(Fo: vec4f, uv: vec2f) -> f32 {
 }
 fn bandOf(Bd: vec4f, P: vec3f, n: f32) -> f32 {
   if (Bd.z <= 0.0) { return 0.0; }
-  let dS = length(P.xz - K.anchor.xz);
+  // (from the eye: at the viewpoint it is the look's camera; from that camera, a walker 120 m on stood in the band and
+  // the ground about their feet went pale)
+  let dS = length(P.xz - F.eye.xz);
   let along = 1.0 - smoothstep(Bd.y * 0.35, Bd.y, abs(dS - Bd.x) + (n - 0.5) * Bd.y * 0.7);
   let low = 1.0 - smoothstep(Bd.w * 0.45, Bd.w, P.y - K.anchor.w + (n - 0.5) * Bd.w * 0.8);
   return along * low * Bd.z;
@@ -587,8 +589,14 @@ fn boreFrame(P: vec3f) -> vec4f {
   let a = K.bore0.xy; let b = K.bore0.zw; let len = max(length(b - a), 1.0);
   let t2 = (b - a) / len;
   let al = dot(P.xz - a, t2); let c = boreCurl(al);
-  let H = mix(K.bore1.x, K.bore1.y, smoothstep(0.3, 1.0, al / len)) * (0.9 + 0.1 * c) * (0.94 + 0.06 * sin(al / 53.0 + 0.7));
-  return vec4f(al, dot(P.xz - a, boreN()), H, c);
+  let H = mix(K.bore1.x, K.bore1.y, smoothstep(0.3, 1.0, al / len)) * (0.9 + 0.1 * c) * (0.94 + 0.06 * sin(al / 53.0 + 0.7)) * (1.09 + 0.09 * sin(al / 71.0 + 2.1));
+  return vec4f(al, dot(P.xz - a, boreN()) - boreBow(al, len), H, c);
+}
+/** the front's bend at al m along it: m ahead of the straight line between its ends (linan's tide.js inkBow; the
+ *  front's 8th value its size, 0 straight) */
+fn boreBow(al: f32, len: f32) -> f32 {
+  let u = clamp(al / len, 0.0, 1.0);
+  return K.bore1.w * (sin(3.14159265 * u) + 0.3 * sin(9.42477796 * u + 0.8) - 0.3 * sin(0.8) * (1.0 - u) - 0.3 * sin(9.42477796 + 0.8) * u);
 }
 
 @fragment
@@ -765,7 +773,10 @@ fn fs(v: VOut) -> @location(0) vec4f {
       // (a pale grey-green veil over the threads near too, as ink02's willows: the threads alone leave it paper)
       // (in locks: some fall full, some thin with the paper between, ink02)
       let lk = vnoise2(vec2f(dot(P - Cw, normalize(vec3f(-Cr.z, 0.0, Cr.x) + vec3f(1e-5, 0.0, 0.0))) / (1.1 * scaleOf(Cc.y)) + f32(Cc.y % 97u) * 0.37, 1.3));
-      crownW = mix((0.12 + 0.13 * smoothstep(0.25, 0.75, lk)) * (0.8 + 0.4 * shade) + 0.04 * under, 0.14 + 0.16 * shade + 0.06 * under, fw); w0 = crownW;
+      // (far off a willow is a pale mass in mist, ink02, or a mid-grey one among the woods at sunset, ink04: the pale
+      // veil stood out of them as sheets)
+      let farW = mix(0.14 + 0.16 * shade + 0.06 * under, 0.34 + 0.2 * shade + 0.08 * under, K.tint.w);
+      crownW = mix((0.12 + 0.13 * smoothstep(0.25, 0.75, lk)) * (0.8 + 0.4 * shade) + 0.04 * under, farW, fw); w0 = crownW;
     }
     if (match_ && cls != C_BLOSSOM && cls != C_WILLOW) {
       // a wood as the references paint it: each crown one dark mass, deeper underneath and on its shaded side (the
@@ -1145,7 +1156,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let ridgeFade = exp(-rdist / max(uRidge, 1.0) * (0.8 + 0.4 * wn));
   if (match_) { wash = mix(wash, wash * (0.25 + 0.75 * ridgeFade) + 0.04 * exp(-rdist / max(uRidge * 0.35, 1.0)) * smoothstep(0.02, 0.2, w0), farK * 0.6); }
   else { wash = mix(wash, wash * (0.08 + 0.92 * ridgeFade) + 0.12 * exp(-rdist / max(uRidge * 0.18, 1.0)) * smoothstep(0.02, 0.2, w0), farK); }
-  // 留白: mist lying low below a height, and in bands at distances from the look's camera
+  // 留白: mist lying low below a height, and in bands at distances from the eye
   var mist = 0.0;
   let MB = K.mistBand;
   if (MB.w > 0.0 && cls != C_SKY && cls != C_WATER) {
@@ -1372,7 +1383,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let toV = dot(Nw.xz, boreN());                        // the surface turned toward the viewer's side (the face)
     // (the painter's light leads: the foam stays paper in a hill's cast shadow)
     let lt = mix(mix(plB, LL.y, 0.4), smoothstep(0.05, 0.65, sunF), 0.15);
-    let shK = 1.0 - smoothstep(0.3, 0.85, lt);
+    // (the spray above the crest is thin and lit through: where the front bends, its sheets turn their backs to the eye
+    // and shaded they read as dark lumps in the foam)
+    let shK = (1.0 - smoothstep(0.3, 0.85, lt)) * (1.0 - 0.85 * smoothstep(0.9, 1.02, yr));
     let under = smoothstep(-0.05, -0.5, Nw.y);            // the curl's underside
     let apron = (1.0 - smoothstep(0.07, 0.17, yr)) * smoothstep(8.0, 11.0, fw);
     let faceK = smoothstep(0.1, 0.45, toV) * (1.0 - apron) * (1.0 - smoothstep(0.86, 0.97, yr));

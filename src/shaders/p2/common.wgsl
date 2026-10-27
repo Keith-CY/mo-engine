@@ -30,7 +30,7 @@ struct Ink2 {
   band1: vec4f,
   band2: vec4f,
   mpatch: vec4f,     // low mist patches between the blocks: size (m), amount
-  tint: vec4f,      // the ink's absorbance multiplier (rgb)
+  tint: vec4f,      // the ink's absorbance multiplier (rgb), far willows' depth (0 the pale veil … 1 a mid-grey mass)
   skyTint: vec4f,   // a sky colour (absorbance rgb), amount
   moonCol: vec4f,   // the sun's / moon's column on the water: amount, half width, widening, lantern glints
   waterRefl: vec4f, // the shore's reflection on day water: gain, fade (sheet px, 0 none)
@@ -42,7 +42,7 @@ struct Ink2 {
   lv1: vec4f,       //   five raw tones (lv0.xyzw, lv1.x) → five tones (lv1.yzw, lv2.xy); lv2.z 1 when given
   lv2: vec4f,
   bore0: vec4f,     // the painted bore's front: its ends (x0, z0, x1, z1; 0 none)
-  bore1: vec4f,     // its crest height over the far part, at the near end (m), a crest's length (m)
+  bore1: vec4f,     // its crest height over the far part, at the near end (m), a crest's length (m), its bow (m)
 };
 
 const C_SKY = 0u; const C_GROUND = 1u; const C_ROCK = 2u; const C_WATER = 3u; const C_ROOF = 4u; const C_WOOD = 5u;

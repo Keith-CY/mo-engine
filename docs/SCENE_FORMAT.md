@@ -161,8 +161,9 @@ A scene the size of a city does not fit one file or one upload:
   length; at night the moon), and the world's own ink settings for that look (`ink`: names the world chooses; Mo's
   demo reads `ranges` = far ranges painted on the sky, in degrees: base elevation, step, ridge amplitude, count,
   azimuth centre, half width, ink, mist fade; painter 2 reads linan's ink settings as they are, `boreFront` among them:
-  a painted tidal bore's front, `[x0, z0, x1, z1, crest height far, near, crest length, 0]`, for the churned water about
-  it and the paint of its class-17 wall). `sun` at the top level is the first look's.
+  a painted tidal bore's front, `[x0, z0, x1, z1, crest height far, near, crest length, bow]` (bow: how far the front
+  bends ahead of the line between its ends, mid-river, in m; 0 straight), for the churned water about it and the paint
+  of its class-17 wall). `sun` at the top level is the first look's.
 
 ## Packed scenes
 
