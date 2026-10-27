@@ -131,6 +131,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
       }
     }
   }
+  // (a willow's threads are single grey strokes and its far crowns soft masses: an outline down both sides of every
+  // thread ribbon reads as white tape)
+  if (c == C_WILLOW) { s *= 0.15; }
   // distance: full weight at near, none at far (log scale)
   let f = clamp(1.0 - log2(max(D, 1.0) / near) / log2(far / near), 0.0, 1.0);
   let hw = wid * K.st1.w * mix(0.45, 1.25, f) * uK;

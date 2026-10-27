@@ -295,17 +295,19 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
       if (pa.x > 0.5) {
         // the slab path: courses across it, each a slab long with jittered ends, split into 2 or 3 slabs (the slab
         // length 1.15 m, the path about 3.2 m across); a course seen end-on shrinks by the sine of the view's elevation
-        let u = pa.y; let x = pa.z;
+        // (courses of 0.68 m, 4 or 5 stones across: ink02's causeway is small worn stones, not big flags)
+        let SK = 1.7;
+        let u = pa.y * SK; let x = pa.z;
         let r = floor(u);
         var du = 1e3;
         for (var k = -1.0; k <= 1.0; k += 1.0) { du = min(du, abs(u - (r + k + 0.18 * (hash3(vec3i(i32(r + k), 7, 1)) - 0.5)))); }
         let rb = select(r, r - 1.0, u < r + 0.18 * (hash3(vec3i(i32(r), 7, 1)) - 0.5));
-        let nA = select(2.0, 3.0, hash3(vec3i(i32(rb), 11, 2)) > 0.55);
+        let nA = select(4.0, 5.0, hash3(vec3i(i32(rb), 11, 2)) > 0.5);
         var dx = min(x, 1.0 - x) * 3.0;
         for (var j = 1.0; j < nA; j += 1.0) { dx = min(dx, abs(x - (j / nA + 0.14 * (hash3(vec3i(i32(rb), i32(j), 3)) - 0.5)))); }
         let elev = max(abs(dir.y), 0.02);
-        let dpxl = min(du * 1.15 * elev, dx * 3.2) / fp;
-        let seen = smoothstep(2.5, 6.0, 1.15 * elev / fp);
+        let dpxl = min(du * 1.15 / SK * elev, dx * 3.2) / fp;
+        let seen = smoothstep(2.5, 6.0, 1.15 / SK * elev / fp);
         joint = (1.0 - smoothstep(0.45, 1.25, dpxl)) * seen;
         block = hash3(vec3i(i32(rb), i32(floor(x * nA)), 5));
       }

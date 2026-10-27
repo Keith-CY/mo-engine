@@ -4,7 +4,7 @@
 //   1 – 0  places · T  next time · M  the menu · F  walk / fly · W A S D or arrows, Shift, Space / E, C / Q · drag or
 //   double-click to look · H  the HUD; touch: a stick on the left, look on the right, up / down buttons while flying
 // ?vp= (or linan's ?at=) the first place (default 2) · ?fps=1 the frame rate · ?menu=1 the menu open · ?ui=0 none · ?adaptive=1 the
-// render scale follows the frame rate under automation too · ?scale=, ?p2dbg=, ?wet=strength,reach,soft, ?hud=1 as the demo's
+// render scale follows the frame rate under automation too · ?scale=, ?p2dbg=, ?wet=strength,reach,soft, ?mirror=gain,fade, ?hud=1 as the demo's
 import { Engine, loadMoScene, NoWebGPU, type Viewpoint } from '../../src/index';
 import { mountWatermark } from './watermark';
 
@@ -171,9 +171,15 @@ async function main(): Promise<void> {
   if (P.get('scale')) { engine.adaptive = false; engine.renderScale = Number(P.get('scale')); engine.resize(); }
   if (P.get('p2dbg')) engine.renderer.p2.debug = Number(P.get('p2dbg'));
   if (P.get('wet')) { const [st, re, so] = P.get('wet')!.split(',').map(Number); Object.assign(engine.renderer.p2.wet, { strength: st, ...(re ? { reach: re } : {}), ...(so >= 0 ? { soft: so } : {}) }); }
+  if (P.get('mirror')) { const [g, f] = P.get('mirror')!.split(',').map(Number); Object.assign(engine.renderer.p2.mirror, { gain: g, ...(f ? { fade: f } : {}) }); }
   // every level-of-detail distance at 0.8 (a fifth fewer triangles where the woods are thick, as at 飞来峰, with no
   // difference the painting shows); ?lod= another scale
-  engine.renderer.lodScale = Number(P.get('lod') ?? 0.8);
+  const lod0 = Number(P.get('lod') ?? 0.8);
+  engine.renderer.lodScale = lod0;
+  // (三潭印月 by night, a long lens on the island: its willows at their far level are solid hulls, read as rock spires —
+  // ink05's open weeping trees need the near levels there)
+  const LOOK_LOD: Record<number, number> = { 5: 3 };
+  const syncLod = () => { engine.renderer.lodScale = lod0 * (LOOK_LOD[engine.look?.id ?? -1] ?? 1); };
   for (const L of scene.looks ?? []) if (REF_INK[L.id] && P.get('refink') !== '0') L.ink = { ...(L.ink ?? {}), ...REF_INK[L.id] };
   engine.setScene(scene);
 
@@ -184,18 +190,19 @@ async function main(): Promise<void> {
   const state = () => ({ place, look: engine.look?.id ?? -1, mode: engine.walker.mode });
   const ui = new UI(vps, {
     place: (id) => go(id),
-    time: (look) => { engine.setLook(look); ui.setState(state()); },
+    time: (look) => { engine.setLook(look); syncLod(); ui.setState(state()); },
     mode: (m) => { engine.walker.mode = m; ui.setState(state()); },
   });
   const go = (id: number, announce = true) => {
     const v = byId(id); if (!v) return;
     place = id;
     engine.goTo(v);
+    syncLod();
     ui.setState(state());
     if (announce) ui.announce(id);
   };
   go(place, false);
-  if (P.get('look')) engine.setLook(Number(P.get('look')));
+  if (P.get('look')) { engine.setLook(Number(P.get('look'))); syncLod(); }
   if (P.get('menu') === '1') ui.toggle(true);
   if (P.get('ui') === '0') ui.root.style.display = 'none';
 
@@ -205,7 +212,7 @@ async function main(): Promise<void> {
     if (n) { const v = vps[(Number(n[1]) + 9) % 10]; if (v) go(v.id); }
     else if (e.code === 'KeyT') {
       const i = TIMES.findIndex((t) => t.look === engine.look?.id);
-      engine.setLook(TIMES[(i + 1) % TIMES.length].look); ui.setState(state());
+      engine.setLook(TIMES[(i + 1) % TIMES.length].look); syncLod(); ui.setState(state());
     } else if (e.code === 'KeyM') ui.toggle();
     else if (e.code === 'Escape' && ui.open) ui.toggle(false);
     else if (e.code === 'KeyH') hud.hidden = !hud.hidden;

@@ -259,7 +259,7 @@ fn boughs(p: vec2f, sc: f32, pxu: f32, seed: f32, willow: bool) -> vec2f {
       m2 = m1 + vec2f(side * (0.25 + 0.5 * h.w) + (h2.x - 0.5) * 0.3, 0.35 + 0.5 * h2.y) * sc;
       b = m2 + vec2f(side * (0.2 + 0.5 * h2.z) - (h2.w - 0.5) * 0.4, 0.3 + 0.5 * h.x) * sc;
     }
-    let w = max(pxu * 0.5, select(0.045, 0.06, willow) * sc);
+    let w = max(pxu * 0.5, select(0.045, 0.04, willow) * sc);
     let w1 = max(pxu * 0.45, w * 0.6); let w2 = max(pxu * 0.4, w * 0.35); let wt = max(pxu * 0.35, 0.01 * sc);
     let c = max(max(segCov(p, a, m1, w, w1, pxu * 0.8), segCov(p, m1, m2, w1, w2, pxu * 0.8)), segCov(p, m2, b, w2, wt, pxu * 0.8));
     cov = max(cov, c * (0.75 + 0.25 * h.w));
@@ -287,8 +287,12 @@ fn willowThreads(p: vec2f, sc: f32, pxu: f32, dens: f32, seed: f32) -> f32 {
       let col = gi + f32(i);
       let h = h43(vec3i(i32(col), i32(seed), 37 + L));
       let x0 = (col + 0.2 + 0.6 * h.y) * S;
-      let sway = 0.06 * sc * sin(p.y / (1.1 * sc) + h.w * 6.28);
-      let w = max(pxu * 0.35, 0.012 * sc);
+      // (the threads hang in locks: thick where a lock falls, thin between — not an even comb)
+      let lock = smoothstep(0.3, 0.7, vnoise2(vec2f(x0 / (1.3 * sc) + seed * 0.13, 3.7)));
+      if (h.z > 0.25 + 0.75 * lock) { continue; }
+      // (a slow sway the whole tree shares, as in a breath of wind, and each thread's own)
+      let sway = 0.22 * sc * sin(p.y / (2.6 * sc) + seed * 0.7) + 0.07 * sc * sin(p.y / (0.9 * sc) + h.w * 6.28);
+      let w = max(pxu * 0.32, 0.01 * sc);
       let dx = abs(p.x - x0 - sway);
       if (dx > w + pxu) { continue; }
       // runs of 1–2.5 m with gaps, each run a chain of leaf dashes
@@ -477,9 +481,9 @@ fn paintedRanges(dirW: vec3f) -> vec3f {
         let dn = exp(-below / (fade * 0.9));
         let mot = vnoise2(d2 * 9.0 + fk * 4.1);
         // (the references' snowy peaks: grey on their shaded spurs and in the gullies, the snow left paper, the crest
-        // only a broken breath of a line)
+        // only a broken breath of a line; the spurs light and broken — full, they read as flat triangles)
         w = select(ink * 0.22 * exp(-below / fade) * (0.4 + 0.9 * mot) * smoothstep(0.0, pxA * 3.0 * uK, below),
-                   ink * (0.12 * line + 0.75 * crev * exp(-below / (fade * 0.45)) + 0.6 * spur * dn + 0.16 * dn * mot), kk < 0.5);
+                   ink * (0.12 * line + 0.75 * crev * exp(-below / (fade * 0.45)) + 0.26 * spur * dn * smoothstep(0.35, 0.65, vnoise2(qp / 18.0 + fk * 2.3)) + 0.16 * dn * mot), kk < 0.5);
       } else if (match_) {
         let mot = vnoise2(d2 * (7.0 + 2.0 * fk) + fk * 4.1) * 0.65 + vnoise2(d2 * 23.0 + fk * 1.7) * 0.35;
         // the woods on it in fine dots, thickest under the crest; the crest itself feathered into the sky
@@ -758,7 +762,10 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // (where its threads get finer than a few pixels, a willow is a soft grey mass, as the references' far willows)
     if (match_ && cls == C_WILLOW) {
       let fw = smoothstep(0.035, 0.1, length(Cr) * pxA * uK / max(scaleOf(Cc.y), 0.3));
-      crownW = mix(0.02 + 0.045 * shade + 0.02 * under, 0.14 + 0.16 * shade + 0.06 * under, fw); w0 = crownW;
+      // (a pale grey-green veil over the threads near too, as ink02's willows: the threads alone leave it paper)
+      // (in locks: some fall full, some thin with the paper between, ink02)
+      let lk = vnoise2(vec2f(dot(P - Cw, normalize(vec3f(-Cr.z, 0.0, Cr.x) + vec3f(1e-5, 0.0, 0.0))) / (1.1 * scaleOf(Cc.y)) + f32(Cc.y % 97u) * 0.37, 1.3));
+      crownW = mix((0.12 + 0.13 * smoothstep(0.25, 0.75, lk)) * (0.8 + 0.4 * shade) + 0.04 * under, 0.14 + 0.16 * shade + 0.06 * under, fw); w0 = crownW;
     }
     if (match_ && cls != C_BLOSSOM && cls != C_WILLOW) {
       // a wood as the references paint it: each crown one dark mass, deeper underneath and on its shaded side (the
@@ -1155,7 +1162,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls != C_SKY && cls != C_WATER && cls != C_WAVE && K.look3.w > 0.0 && !night) {
     let fn_ = lodNoise(P * vec3f(1.0, 1.5, 1.0) + 41.0, max(fp * 80.0 * uK, 1.0));
     let fw = K.look3.z * (0.45 + 1.1 * fn_) * mix(0.5, 1.0, smoothstep(near, far * 0.25, D));
-    let foot = (1.0 - smoothstep(0.0, fw, RG.a)) * smoothstep(near * 1.2, near * 4.0, D) * K.look3.w;
+    // (wide and soft: a narrow band hugging the nearer form's outline reads as a white halo cut round it, not mist)
+    let fo = 1.0 - smoothstep(0.0, fw * 2.6, RG.a);
+    let foot = fo * fo * 0.85 * smoothstep(near * 1.2, near * 4.0, D) * K.look3.w;
     mist = max(mist, foot * select(1.0, 0.45, isArch(cls)));
   }
   // the woods dark at the shore and paling upward into the evening haze (world height, so it holds still)
@@ -1224,7 +1233,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
         var bg = boughs(lp, sc, fpo, seed, true);
         bg.x *= 1.0 - fw;
         let th = willowThreads(lp, sc, fpo, select(0.55 + 0.35 * shade, 0.85, paperLift > 0.5), seed);
-        nearL = max(th * 0.55, bg.x * 0.95);
+        // (the limbs only glimpsed through the threads: full ink they float in the crown as dark blades)
+        nearL = max(th * 0.55, bg.x * 0.55);
         thread = th * (1.0 - bg.x);
       }
       else if (cls == C_WILLOW) { nearL = willowStrands(lp, fpo * 16.0, fpo, select(dens * 0.55, 0.85, paperLift > 0.5), seed); }
@@ -1242,7 +1252,10 @@ fn fs(v: VOut) -> @location(0) vec4f {
       else { nearL = leafDots(lp, fpo * select(10.0, 5.5, crownW >= 0.0), fpo, dens, seed, 0.0, 1.5) * select(1.0, 0.55 + 0.45 * clumpB, crownW >= 0.0); }
     }
     var farL = 0.0;
-    if (mi > 0.001) { farL = miDots(lp, fpo * 9.0, 0.85 * clamp(idk, 0.3, 1.0), seed); }
+    // (groves: the far crowns' dots gather in world-anchored clumps a few tens of metres across, with paler gaps between —
+    // one dot per crown evenly over a whole hill reads as a stamp)
+    let grove = smoothstep(0.3, 0.7, lodNoise(P * vec3f(1.0, 0.6, 1.0) + 17.0, max(38.0, fp * uK * 6.0)));
+    if (mi > 0.001) { farL = miDots(lp, fpo * 9.0, 0.85 * clamp(idk, 0.3, 1.0) * mix(0.25, 1.15, grove), seed) * mix(0.55, 1.0, grove); }
     leaf = mix(nearL, farL * select(0.6, 0.15, cls == C_BLOSSOM || cls == C_WILLOW), mi) * (1.0 - smoothstep(cunFar * 0.7, cunFar * 1.4, Do)) * K.look5.y;
   }
 
@@ -1362,7 +1375,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let fq = vec2f(BF.x, P.y);                            // the front's plane: m along it, m up
     let px = max(fp * uK, 1e-4);
     let l = log2(px * 30.0); let l0 = floor(l); let lt2 = smoothstep(0.0, 1.0, l - l0);
-    let pd = clamp(0.4 + 0.35 * (1.0 - yr), 0.0, 0.9);
+    let pd = clamp(0.4 + 0.35 * (1.0 - yr), 0.0, 0.9) * mix(0.5, 1.2, vnoise2(vec2f(BF.x / (H * 0.9), 5.7)));
     let pour = mix(streakLevel(fq, vec2f(0.0, -1.0), exp2(l0), pd, 1.0, l0 + 60.0), streakLevel(fq, vec2f(0.0, -1.0), exp2(l0 + 1.0), pd, 1.0, l0 + 61.0), lt2);
     // the face: under a full curl the hollow under the lip is the darkest grey, the face below it grey cut by white
     // streaks of foam pouring down; where the crest spills the whole face is white foam streaked with grey; the trough
@@ -1370,10 +1383,13 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let ck = BF.w;
     let hollow = smoothstep(0.42, 0.74, yr) * (1.0 - smoothstep(0.84, 0.93, yr));
     let trough = 1.0 - smoothstep(0.02, 0.22, yr);
-    let curlW = (mix(0.16, 0.48, hollow) * (1.0 - 0.8 * pour) + 0.1 * trough) * (0.85 + 0.25 * shK);
+    // (each crest its own hollow, deep where it curls hardest and broken where foam spills over the lip: one dark band
+    // the whole length of the front reads as a rail, the streaks under it as a fence's palings)
+    let crestV = smoothstep(0.25, 0.75, vnoise2(vec2f(BF.x / (H * 1.7), 3.3))) * 0.7 + 0.3 * smoothstep(0.3, 0.7, vnoise2(vec2f(BF.x / (H * 0.5), 8.1)));
+    let curlW = (mix(0.16, mix(0.18, 0.5, crestV), hollow) * (1.0 - 0.8 * pour) + 0.1 * trough) * (0.85 + 0.25 * shK);
     let spillW = 0.04 + 0.2 * pour * (1.0 - trough) + 0.16 * trough + 0.06 * shK;
     var w = mix(spillW, curlW, smoothstep(0.25, 0.75, ck)) * faceK;
-    w = max(w, (0.3 + 0.25 * shK) * (0.4 + 0.6 * ck) * under * (1.0 - spray));
+    w = max(w, (0.3 + 0.25 * shK) * (0.4 + 0.6 * ck) * under * (1.0 - spray) * mix(0.25, 1.0, crestV));
     let top = (1.0 - faceK) * (1.0 - under) * (1.0 - apron) * (1.0 - back);
     // (the foam's folds: a soft grey where a lump turns from the light, world-anchored mottling, no outlines)
     let fold = lodNoise(P * vec3f(1.0, 1.4, 1.0) + 13.0, max(px * 25.0, 0.3));
@@ -1394,7 +1410,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // the spray's torn top edge: the streaks and the grey thin out into paper toward it (no hard rim)
     let rimT = smoothstep(0.0, 7.0, RG.r);
     wash *= mix(1.0, rimT, spray);
-    wave = lineF * faceK * 0.6 + sst * 0.4 * mix(1.0, rimT, spray);
+    wave = lineF * faceK * 0.35 * crestV + sst * 0.4 * mix(1.0, rimT, spray);
   }
 
   // ---------------- brush lines (the nearest seed of the jump flood: its strength, width, direction and type)
@@ -1516,11 +1532,20 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // (the spacing in power-of-two levels blended by distance: a scale that follows the distance continuously would
     // make the gaps crawl as the eye walks)
     let sn = lodNoise(vec3f(P.x, P.y * 0.1, P.z) + vec3f(1.3, 7.1, 4.4), max(0.18, fp * uK * 3.0));
-    let gap = smoothstep(0.55 * hem, 0.55 * hem - 0.06, sn) * step(1.0, h) * step(0.001, hem);
+    // (only toward the hem, and few: an even run of paper slits down the whole crown reads as a bar code)
+    let gap = smoothstep(0.32 * hem * hem, 0.32 * hem * hem - 0.05, sn) * step(1.0, h) * step(0.001, hem);
     if (gap > 0.0) {
       let behind = select(0.0, (0.52 + 0.22 * smoothstep(0.0, 0.45, dirW.y)) * K.sh2.x, night);
       ink = mix(ink, behind, gap);
     }
+  }
+  // a willow by night (ink05's island): the night sky through the crown, only its limbs and hanging threads dark — the
+  // far crowns' solid hulls read as rock spires
+  if (cls == C_WILLOW && match_ && hasN && night) {
+    let hN = P.y - Cw.y;
+    let marks = clamp(leaf * 1.8, 0.0, 1.0);
+    let skyN = (0.52 + 0.22 * smoothstep(0.0, 0.45, dirW.y)) * K.sh2.x;
+    ink = mix(ink, skyN, (1.0 - max(marks, 0.3)) * smoothstep(1.2, 2.6, hN));
   }
   // haze: beyond the haze distance everything fades toward the paper
   if (K.look2.w > 0.0 && cls != C_SKY) { ink *= 1.0 - 0.8 * smoothstep(K.look2.w, K.look2.w * 2.5, D); }

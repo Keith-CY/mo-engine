@@ -56,6 +56,9 @@ export class Painter2 {
   benchFlags = 0;
   /** the wet paper: how strongly the ink creeps (0 off), its reach (px at 1664 across), how far hard edges soften */
   wet = { strength: 1, reach: 4.5, soft: 0.2 };
+  /** the still lake's mirror (laid in the wet pass): how dark the shore's painted reflection lies (0 off), how far below
+   *  the shore line it fades (px at 1664 across) */
+  mirror = { gain: 0.8, fade: 260 };
   /** parts of the painting compiled in (benchmarks: reinit() after a change) */
   features = { ground: true, leaf: true, lines: true, detail: true, cun: true, rock: true, water: true };
   /** compiles the passes again (after `features` change) */
@@ -63,7 +66,7 @@ export class Painter2 {
 
   constructor(private readonly device: GPUDevice) {
     this.inkBuf = device.createBuffer({ label: 'mo p2 ink', size: INK_FLOATS * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.wetBuf = device.createBuffer({ label: 'mo p2 wet', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.wetBuf = device.createBuffer({ label: 'mo p2 wet', size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
   }
 
@@ -152,7 +155,7 @@ export class Painter2 {
       t.edge.createView(), t.jfa[t.jfaOut].createView(), t.ridge.createView(), t.light[0].createView(), t.lightE[0].createView(), this.sampler, { buffer: g.inst }], t.painted);
     // the ink creeps into the damp paper
     stage = 'wet';
-    pass('p2 wet', P.wet, [{ buffer: g.frame }, { buffer: this.wetBuf }, g.a.createView(), t.painted.createView(), this.sampler], out);
+    pass('p2 wet', P.wet, [{ buffer: g.frame }, { buffer: this.wetBuf }, g.a.createView(), t.painted.createView(), t.ridge.createView(), this.sampler], out);
     this.targets = t;
     this.boundTo = g.a; this.boundOut = out; this.boundInst = g.inst;
     return t;
@@ -218,7 +221,8 @@ export class Painter2 {
     f.set(vals);
     this.device.queue.writeBuffer(this.inkBuf, 0, f);
     const wt = this.wet;
-    this.device.queue.writeBuffer(this.wetBuf, 0, new Float32Array([this.debug ? 0 : wt.strength, wt.reach, wt.soft, night || num('night', 0) ? 1 : 0]));
+    const mr = this.mirror;
+    this.device.queue.writeBuffer(this.wetBuf, 0, new Float32Array([this.debug ? 0 : wt.strength, wt.reach, wt.soft, night || num('night', 0) ? 1 : 0, this.debug ? 0 : mr.gain, mr.fade, 0, 0]));
   }
 
   /** records the painter's passes: the G-buffer in, the painting out */
