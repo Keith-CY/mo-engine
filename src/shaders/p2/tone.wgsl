@@ -56,7 +56,11 @@ fn toneAt(p: vec2i) -> f32 {
   let B = textureLoad(gB, p, 0);
   let cls = clsOf(A);
   // (?p2dbg=9: the raw tone, before the look's levels)
-  var t = rawTone(B, cls);
+  // masonry keeps little of the leaves' dappled shadow (it read as pale blotches across a bridge's face); its own
+  // turned-away faces stay dark by their normal
+  var Bs = B;
+  if (cls == C_STONE || cls == C_WALL) { Bs.x = max(dot(worldNormal(A), F.sun.xyz), 0.0) * mix(B.w, 1.0, 0.7); }
+  var t = rawTone(Bs, cls);
   if (u32(K.inkAbs.w + 0.5) != 9u) { t = levels(t); }
   // thin foliage: the photograph's leaves and strands cover a pixel only in part (alpha to coverage over many samples;
   // the G-buffer's alpha test covers it whole), so the sky and what lies behind show through a willow's veil

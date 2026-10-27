@@ -177,8 +177,9 @@ async function main(): Promise<void> {
   const lod0 = Number(P.get('lod') ?? 0.8);
   engine.renderer.lodScale = lod0;
   // (三潭印月 by night, a long lens on the island: its willows at their far level are solid hulls, read as rock spires —
-  // ink05's open weeping trees need the near levels there)
-  const LOOK_LOD: Record<number, number> = { 5: 3 };
+  // ink05's open weeping trees need the near levels there; 苏堤's willows 15–70 m off read as flat grey slabs at their
+  // middle level)
+  const LOOK_LOD: Record<number, number> = { 2: 3, 5: 3 };
   const syncLod = () => { engine.renderer.lodScale = lod0 * (LOOK_LOD[engine.look?.id ?? -1] ?? 1); };
   for (const L of scene.looks ?? []) if (REF_INK[L.id] && P.get('refink') !== '0') L.ink = { ...(L.ink ?? {}), ...REF_INK[L.id] };
   engine.setScene(scene);

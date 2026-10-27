@@ -23,8 +23,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let A = textureLoad(gA, p, 0);
   let B = textureLoad(gB, p, 0);
   if (A.z <= 0.0) { return vec4f(0.6, 0.6, 0.0, 1.0); }
-  let s = clamp(B.x, 0.0, 1.5);
   let n = worldNormal(A);
+  // (masonry: the leaves' dappled shadow mostly left out, as in the tone)
+  let cls = clsOf(A);
+  var s = clamp(B.x, 0.0, 1.5);
+  if (cls == C_STONE || cls == C_WALL) { s = max(dot(n, F.sun.xyz), 0.0) * mix(B.w, 1.0, 0.7); }
   let L = normalize(-0.55 * K.axisR.xyz + vec3f(0.0, 0.75, 0.0) - 0.35 * K.axisF.xyz);
   let pl = clamp(0.55 + 1.3 * (dot(n, L) - 0.35), 0.0, 1.0);
   return vec4f(s, pl, 0.0, 1.0);

@@ -799,7 +799,12 @@ fn fs(v: VOut) -> @location(0) vec4f {
     }
   }
   if (cls == C_IVY && !night) { w0 = 0.42 + 0.25 * shade; }
-  if (cls == C_BARK && !night && match_) { w0 = max(w0, 0.55 + 0.3 * shade); }
+  if (cls == C_BARK && !night && match_) {
+    // (the limbs above a crown's fork in a lighter ink than the trunk: full dark they stand out of the willows' pale
+    // veils as palm fronds)
+    let up = select(0.0, smoothstep(2.2, 3.6, (P.y - originOf(Cc.y).y) / max(scaleOf(Cc.y), 0.3)), hasN);
+    w0 = mix(max(w0, 0.55 + 0.3 * shade), min(w0, 0.22 + 0.14 * shade), up);
+  }
   // buildings modelled in tone as the references' 界画 are, not white fills inside outlines: walls and timber grey
   // in shade, the undersides of the eaves and the brackets dark
   if (match_ && !night && (cls == C_WALL || cls == C_WOOD || cls == C_STONE || cls == C_DARK) && hasN) {
@@ -1129,10 +1134,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let rim = smoothstep(0.45, 0.6, fr) * (1.0 - smoothstep(0.6, 0.95, fr)) * step(0.0, fl) * step(0.02, w1);
   var wash = max(mix(w1, layered, select(select(0.5, 0.2, isFol(cls)), 0.25, isArch(cls))), 0.0)
            + rim * K.st1.x / LAY * select(select(1.0, 0.0, isFol(cls) && cls != C_LOTUS), 0.3, cls == C_ROCK || isFig(cls));
-  // a sky wash (and a roof plane) is laid flat, in one go
+  // a sky wash (and a roof plane) is laid flat, in one go; masonry too (its layered steps mottled a bridge's blocks
+  // into pale blotches)
   if (cls == C_SKY || cls == C_LOTUS || cls == C_GLOW || (night && (isArch(cls) || isLand(cls) || isFol(cls)))
       || (cls == C_WATER && (night || paperLift > 0.5 || K.look5.x > 0.0 || K.waterRefl.y > 0.0)) || cls == C_ROOF || cls == C_CITYFAR
-      || ((cls == C_ROCK || cls == C_NICHE || isFig(cls)) && nearR > 0.5) || (cls == C_PAVE && match_)) { wash = w1; }
+      || ((cls == C_ROCK || cls == C_NICHE || isFig(cls)) && nearR > 0.5) || ((cls == C_PAVE || cls == C_STONE) && match_)) { wash = w1; }
 
   // far ranges: dark at the ridge, fading downward into mist (留白)
   let farK = smoothstep(ridgeFrom * 0.7, ridgeFrom * 1.4, D) * select(0.0, 1.0, uRidge > 0.0 && cls != C_SKY && cls != C_WATER);
@@ -1234,7 +1240,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
         bg.x *= 1.0 - fw;
         let th = willowThreads(lp, sc, fpo, select(0.55 + 0.35 * shade, 0.85, paperLift > 0.5), seed);
         // (the limbs only glimpsed through the threads: full ink they float in the crown as dark blades)
-        nearL = max(th * 0.55, bg.x * 0.55);
+        nearL = max(th * 0.55, bg.x * 0.38);
         thread = th * (1.0 - bg.x);
       }
       else if (cls == C_WILLOW) { nearL = willowStrands(lp, fpo * 16.0, fpo, select(dens * 0.55, 0.85, paperLift > 0.5), seed); }
