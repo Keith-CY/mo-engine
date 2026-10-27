@@ -38,15 +38,16 @@ fn fs(v: VOut) -> @location(0) vec4f {
       if (f32(i) * 2.0 > K.look4.w) { break; }   // (the walking painting looks 120 px, a still 240: far lanterns' reflections)
       let dy = f32(i) * stepPx;
       var dir = 0.0;
-      if (fc.y - dy > 0.0) { let cb = clsOf(at(fc.x, fc.y - dy)); if (cb != C_WATER && cb != C_SKY) { dir = -1.0; } }
-      if (dir == 0.0 && fc.y + dy < H) { let cb = clsOf(at(fc.x, fc.y + dy)); if (cb != C_WATER && cb != C_SKY) { dir = 1.0; } }
+      // (a boat afloat is no shore: measured from it, the lake's tone and mirror change in a column under its hull)
+      if (fc.y - dy > 0.0) { let cb = clsOf(at(fc.x, fc.y - dy)); if (cb != C_WATER && cb != C_SKY && cb != C_BOAT) { dir = -1.0; } }
+      if (dir == 0.0 && fc.y + dy < H) { let cb = clsOf(at(fc.x, fc.y + dy)); if (cb != C_WATER && cb != C_SKY && cb != C_BOAT) { dir = 1.0; } }
       if (dir != 0.0) {
         // refine to the pixel (the shore's mirror line would step in whole steps: the reflection drawn in blocks)
         var lo = dy - stepPx; var hi = dy;
         for (var k = 0; k < 4; k++) {
           let mid = 0.5 * (lo + hi);
           let cm = clsOf(at(fc.x, fc.y + dir * mid));
-          if (cm != C_WATER && cm != C_SKY) { hi = mid; } else { lo = mid; }
+          if (cm != C_WATER && cm != C_SKY && cm != C_BOAT) { hi = mid; } else { lo = mid; }
         }
         sh = hi; break;
       }
