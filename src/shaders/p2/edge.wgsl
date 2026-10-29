@@ -55,7 +55,13 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let uK = K.res.z;
   let near = K.sh0.x; let far = K.sh0.y;
   var cl5 = classLine(c);
-  let wSil = cl5[0]; var wCr = cl5[1]; let tCr = cl5[2]; let wid = cl5[3]; let typ = cl5[4];
+  var wSil = cl5[0]; var wCr = cl5[1];
+  // (the bore's spray thrown above its crest has no edge: it thins into the air, ink09; outlined it read as cumulus)
+  if (c == C_WAVE && K.bore0.x != 0.0) {
+    let Hb = 0.5 * (K.bore1.x + K.bore1.y);
+    let Py = relPosOf((vec2f(p) + 0.5) / K.res.xy, D).y + F.eye.y;
+    wSil *= 1.0 - 0.9 * smoothstep(1.1 * Hb, 1.9 * Hb, Py);
+  } let tCr = cl5[2]; let wid = cl5[3]; let typ = cl5[4];
   let n = octDecode(a.xy);
   var s = 0.0; var grad = vec2f(0.0);
   let fol = isFol(c);

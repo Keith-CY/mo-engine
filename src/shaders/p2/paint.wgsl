@@ -1318,7 +1318,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // spent foam runs on ahead of its foot toward the bank, in the front's own frame, scaled by the wall's height
     if (K.bore0.x != 0.0 && match_) {
       let BF = boreFrame(P);
-      let kk = max(BF.z / 14.0, 0.5);
+      // (sized in metres, not by the wall: the water stands only 7-12 m, its churn spreads hundreds of metres, ink09)
+      let kk = 2.4;
       let al = BF.x; let sd = -BF.y;                                 // sd: + behind the front (away from the camera)
       let bl = length(K.bore0.zw - K.bore0.xy);
       let inside = smoothstep(-20.0, 10.0, al) * (1.0 - smoothstep(bl - 10.0, bl + 30.0, al));
@@ -1344,7 +1345,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
             for (var i = -1; i <= 1; i++) {
               let cid = gi + vec2f(f32(i), f32(j));
               let h = h43(vec3i(vec2i(cid), i32(lev) * 7 + 811));
-              if (h.w < 0.2) { continue; }
+              if (h.w < 0.1) { continue; }
               let cc = (cid + vec2f(0.5 * fmodp(cid.y, 2.0) + h.x * 0.6, 0.3 + 0.4 * h.y)) * vec2f(Su, Sv);
               let vv = (q2 - cc) / vec2f(Su * (0.35 + 0.4 * h.z), Sv);
               if (abs(vv.x) > 1.0) { continue; }
@@ -1359,8 +1360,15 @@ fn fs(v: VOut) -> @location(0) vec4f {
         // the spent foam ahead: long streaks of white along the front on a paler grey, fewer dark troughs
         let ahead = step(sd, 0.0);
         let streak = smoothstep(0.55, 0.8, lodNoise(vec3f(al * 0.06, 0.0, sd * 0.6) + 3.1, max(fp * 6.0 * uK / max(sinW2, 0.05), 0.4))) * ahead;
+        // the broken white water behind: foam in torn patches, thick by the front and thinning away from it (the crests'
+        // lattice alone read as fish scales)
+        // (patches ~25 m along the front and a third of that across it, never finer than a few pixels)
+        let fpx = fp * uK * 3.0;
+        let fq3 = vec3f(al, 0.0, sd * 3.0);
+        let fN = lodNoise(fq3 + 9.7, max(28.0, fpx * 2.0)) * 0.65 + lodNoise(fq3 + 4.1, max(9.0, fpx)) * 0.35;
+        let foamB = smoothstep(0.6 - 0.2 * exp(-max(sd, 0.0) / (45.0 * kk)), 0.7, fN) * (1.0 - ahead);
         let g0 = mix(0.24 + 0.3 * trough, 0.2 + 0.12 * trough, ahead) * (0.75 + 0.35 * exp(-abs(sd) / (50.0 * kk)));
-        wash = mix(wash, g0 * (1.0 - 0.85 * max(crest, streak * 0.8)) * inkGain * (1.0 - mist), churn);
+        wash = mix(wash, g0 * (1.0 - 0.85 * max(max(crest, streak * 0.8), foamB)) * inkGain * (1.0 - mist), churn);
         wave *= 1.0 - churn;
       }
       // white water at the foot of the face (under its apron): the wash lifts to paper
@@ -1373,9 +1381,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   if (cls == C_WAVE && match_ && K.bore0.x != 0.0) {
     // ink09, after 李嵩《钱塘观潮图》 / 马远《水图》: the painted bore as a breaking wall, painted in the front's own
     // frame (m along it, m ahead of the crest, the local height): the foam left as paper; the face a grey wash
-    // deepening up into the hollow under each curling lip, cut by streaks of foam pouring down it and crossed by fine
-    // lines running along the wall (水纹); the curl's underside a dark hook; dry streaks of spray rising up and back off
-    // the crest; the white water spread at the foot; the raised churned water behind the crest a light grey
+    // deepening up into the hollow under each curling lip, cut by streaks of foam pouring down it; the curl's underside
+    // a dark hook; the bursts of spray above the crest soft grey billows with dry streaks rising up and back, fading into
+    // the sky; the white water spread at the foot; the raised churned water behind the crest a light grey
     let BF = boreFrame(P);
     let H = max(BF.z, 1.0); let kk = H / 16.0;
     let yr = P.y / H;                                     // height on the wall (1 = the crest)
@@ -1383,9 +1391,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let toV = dot(Nw.xz, boreN());                        // the surface turned toward the viewer's side (the face)
     // (the painter's light leads: the foam stays paper in a hill's cast shadow)
     let lt = mix(mix(plB, LL.y, 0.4), smoothstep(0.05, 0.65, sunF), 0.15);
-    // (the spray above the crest is thin and lit through: where the front bends, its sheets turn their backs to the eye
-    // and shaded they read as dark lumps in the foam)
-    let shK = (1.0 - smoothstep(0.3, 0.85, lt)) * (1.0 - 0.85 * smoothstep(0.9, 1.02, yr));
+    // (the spray thrown up above the crest is lit through: its billows a soft grey where they turn from the light, never
+    // the shaded water's darks)
+    let shK = (1.0 - smoothstep(0.3, 0.85, lt)) * (1.0 - 0.45 * smoothstep(0.9, 1.2, yr));
     let under = smoothstep(-0.05, -0.5, Nw.y);            // the curl's underside
     let apron = (1.0 - smoothstep(0.07, 0.17, yr)) * smoothstep(8.0, 11.0, fw);
     let faceK = smoothstep(0.1, 0.45, toV) * (1.0 - apron) * (1.0 - smoothstep(0.86, 0.97, yr));
@@ -1412,24 +1420,25 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let top = (1.0 - faceK) * (1.0 - under) * (1.0 - apron) * (1.0 - back);
     // (the foam's folds: a soft grey where a lump turns from the light, world-anchored mottling, no outlines)
     let fold = lodNoise(P * vec3f(1.0, 1.4, 1.0) + 13.0, max(px * 25.0, 0.3));
-    w = max(w, top * (0.02 + 0.2 * shK * shK + 0.06 * smoothstep(0.5, 0.8, fold)));
+    // (low in a burst the water is still heavy: a broken mid-grey between the white lumps; higher the spray thins, paler
+    // and fainter toward its top, as ink09's bursts rise out of the grey into mist)
+    let low = 1.0 - smoothstep(0.95, 1.7, yr);
+    let thin = mix(1.0, 0.3, smoothstep(1.3, 3.2, yr));
+    let brk = smoothstep(0.42, 0.7, fold);
+    w = max(w, top * (0.03 + 0.2 * shK * shK + 0.1 * brk + 0.16 * low * brk) * thin);
     w = max(w, back * (1.0 - spray) * (0.13 + 0.08 * shK) * (1.0 - 0.7 * pour));
     let apS = smoothstep(0.5, 0.8, lodNoise(vec3f(BF.x * 0.08, 0.0, BF.y * 0.5) + 5.0, max(px * 8.0, 0.3)));
     w = mix(w, 0.04 + 0.12 * apS, apron);
     wash = w * inkGain;
-    // lines along the face: rows of constant height on the wall, waving gently along it, broken where the brush lifts
-    let gL = yr * 3.5 + 0.45 * sin(BF.x / (H * 0.8) + 1.3) + 0.25 * sin(BF.x / (H * 0.33));
-    let dL = abs(gL - floor(gL + 0.5)) * (H / 3.5) / px;
-    let lineF = smoothstep(0.9, 0.3, dL) * smoothstep(0.5, 0.68, lodNoise(vec3f(BF.x * 0.3, P.y * 2.0, 0.0) + 7.0, max(px * 30.0, 0.5))) * step(0.15, yr) * step(yr, 0.82);
     // spray: dry streaks rising up and back off the crest, thinning into the sky
     let sl = log2(px * 22.0); let sl0 = floor(sl);
-    let sdens = clamp(0.15 + 0.35 * shK, 0.0, 0.7) * max(top, spray * 0.8) * (1.0 - smoothstep(1.15, 1.4, yr));
+    let sdens = clamp(0.15 + 0.35 * shK, 0.0, 0.7) * max(top, spray * 0.8) * (1.0 - smoothstep(2.2, 3.6, yr));
     let sd2 = normalize(vec2f(0.55, 1.0));
     let sst = mix(streakLevel(fq, sd2, exp2(sl0), sdens, 1.0, sl0 + 70.0), streakLevel(fq, sd2, exp2(sl0 + 1.0), sdens, 1.0, sl0 + 71.0), smoothstep(0.0, 1.0, sl - sl0));
     // the spray's torn top edge: the streaks and the grey thin out into paper toward it (no hard rim)
-    let rimT = smoothstep(0.0, 7.0, RG.r);
+    let rimT = smoothstep(0.0, 14.0 * uK, RG.r);
     wash *= mix(1.0, rimT, spray);
-    wave = lineF * faceK * 0.35 * crestV + sst * 0.4 * mix(1.0, rimT, spray);
+    wave = sst * 0.4 * mix(1.0, rimT, spray);
   }
 
   // ---------------- brush lines (the nearest seed of the jump flood: its strength, width, direction and type)
