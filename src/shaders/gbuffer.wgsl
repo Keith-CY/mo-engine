@@ -132,10 +132,12 @@ fn liftWater(rel0: vec3f, vcls: u32, n: f32, span: f32) -> Lifted {
   let A = F.fieldNear;
   let inNear = F.fieldNearB.y > 0.5 && all(xz > A.xy) && all(xz < A.xy + A.z * (vec2f(A.w, F.fieldNearB.x) - 1.0));
   var bed = select(select(-1e3, fieldHeight(true, xz), F.fieldFarB.y > 0.5), fieldHeight(false, xz), inNear) - F.waterB.x + 0.2;
+  // (the waves die out over the last 2 m of depth: their crests ran up over the low bank and through the trees on it)
+  let calm = smoothstep(0.0, 2.0, -bed);
   bed = min(bed, -0.1);   // (on land the water stays under the ground)
   let floorW = 0.4;
-  var h = wsHeight(xz);
-  let hx = wsHeight(xz + vec2f(c, 0.0)); let hz = wsHeight(xz + vec2f(0.0, c));
+  var h = wsHeight(xz) * calm;
+  let hx = wsHeight(xz + vec2f(c, 0.0)) * calm; let hz = wsHeight(xz + vec2f(0.0, c)) * calm;
   let fl = (vec3f(h, hx, hz) - bed) / floorW;
   let lifted = bed + floorW * select(fl, log(1.0 + exp(fl)), fl < vec3f(8.0));
   h = lifted.x;

@@ -102,6 +102,37 @@ fn streakLevel(q: vec2f, d: vec2f, S: f32, dens: f32, kind: f32, lev: f32) -> f3
   else { c *= 0.7 + 0.3 * smoothstep(0.2, 0.7, vnoise2(u * vec2f(0.5, 1.5) + 9.0 + lev)); }
   return c;
 }
+/** the churned water's breaking crests (ink09), in a front's frame q (m along it, m behind it), over two lattice levels
+ *  from l0 (cells 2^l0 m deep, blended by t): one crest per cell of a staggered lattice, an arc of random width and
+ *  offset, white on its top edge (x), a dark trough in its lee toward the viewer (y); sinW foreshortens the cells, `ar`
+ *  their length over their depth, `gap` the share of cells left empty */
+fn chopArcs(q2: vec2f, sinW2: f32, l0: f32, tt: f32, ar: f32, gap: f32) -> vec2f {
+  var crest = 0.0; var trough = 0.0;
+  for (var L = 0; L < 2; L++) {
+    let lev = l0 + f32(L);
+    let wl = select(tt, 1.0 - tt, L == 0);
+    if (wl < 0.01) { continue; }
+    let Sv = exp2(lev); let Su = Sv * ar * max(sinW2, 0.03);
+    let g = vec2f(q2.x / Su, q2.y / Sv); let gi = floor(g);
+    var c0 = 0.0; var t0 = 0.0;
+    for (var j = -1; j <= 1; j++) {
+      for (var i = -1; i <= 1; i++) {
+        let cid = gi + vec2f(f32(i), f32(j));
+        let h = h43(vec3i(vec2i(cid), i32(lev) * 7 + 811));
+        if (h.w < gap) { continue; }
+        let cc = (cid + vec2f(0.5 * fmodp(cid.y, 2.0) + h.x * 0.6, 0.3 + 0.4 * h.y)) * vec2f(Su, Sv);
+        let vv = (q2 - cc) / vec2f(Su * (0.35 + 0.4 * h.z), Sv);
+        if (abs(vv.x) > 1.0) { continue; }
+        let taper = 1.0 - vv.x * vv.x;
+        let dy = vv.y - 0.35 * taper;                         // + behind (far side), − toward the viewer
+        c0 = max(c0, smoothstep(0.3 * taper, 0.05 * taper, abs(dy + 0.05)) * taper);
+        t0 = max(t0, smoothstep(-0.05, -0.18, dy) * (1.0 - smoothstep(-0.35, -0.6, dy)) * taper);
+      }
+    }
+    crest += c0 * wl; trough += t0 * wl;
+  }
+  return vec2f(crest, trough);
+}
 fn cunStrokes(P: vec3f, Nw: vec3f, fp: f32, dens: f32, kind: f32) -> f32 {
   let uK = K.res.z;
   // the vertical plane facing the look; strokes run down the slope as the painter sees it
@@ -1183,7 +1214,10 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let fw = K.look3.z * (0.45 + 1.1 * fn_) * mix(0.5, 1.0, smoothstep(near, far * 0.25, D));
     // (wide and soft: a narrow band hugging the nearer form's outline reads as a white halo cut round it, not mist)
     let fo = 1.0 - smoothstep(0.0, fw * 2.6, RG.a);
-    let foot = fo * fo * 0.85 * smoothstep(near * 1.2, near * 4.0, D) * K.look3.w;
+    var foot = fo * fo * 0.85 * smoothstep(near * 1.2, near * 4.0, D) * K.look3.w;
+    // (not by the modelled water: the slope comes down into the churned river dark, ink09; the trees standing at its
+    // edge took the mist as white columns)
+    if (wsOn()) { foot *= 1.0 - wsInside(P.xz, 150.0); }
     mist = max(mist, foot * select(1.0, 0.45, isArch(cls)));
   }
   // the woods dark at the shore and paling upward into the evening haze (world height, so it holds still)
@@ -1365,8 +1399,21 @@ fn fs(v: VOut) -> @location(0) vec4f {
       // foam behind in torn patches over the waves, thick by the crest and thinning away
       let fN = lodNoise(vec3f(fr.x, 0.0, fr.y * 3.0) + 9.7, max(28.0, px * 6.0)) * 0.65 + lodNoise(vec3f(fr.x, 0.0, fr.y * 3.0) + 4.1, max(9.0, px * 3.0)) * 0.35;
       let foamB = smoothstep(0.62 - 0.25 * exp(min(fr.y, 0.0) / 90.0), 0.72, fN) * behind * (0.5 + 0.5 * lace);
-      let white = max(max(max(crestW, foamB), faceFoam), max(crestB, max(backF, foot)));
-      var g = mix(gW, gFace, faceK);
+      // the broken chop (ink09): short breaking crests in rows, white over dark lees, and dry streaks of spent foam
+      // along the front, finer than the modelled waves (a few pixels to a cell at any distance); thickest ahead of the
+      // foot, thinner far ahead and on the churn behind
+      // (foreshortened as this eye sees the water, not as the painting's anchor would)
+      let sinW2 = sinG;
+      let lc = log2(18.0 * uK * max(fp, 1e-5) / max(sinG, 1e-3)); let lc0 = floor(lc);
+      let ch = chopArcs(vec2f(fr.x, -fr.y), sinW2, lc0, smoothstep(0.0, 1.0, lc - lc0), 1.7, 0.3);
+      // (in clumps, ink09: broken heaps of white over dark rolls, calmer runs between them; on the model's crests)
+      let clump = smoothstep(0.3, 0.68, lodNoise(vec3f(fr.x * 0.6, 0.0, fr.y * 1.4) * 0.025 + 1.9, max(px * 10.0, 1.0)) + 0.25 * wv);
+      let chopK = (smoothstep(8.0, 16.0, s) * (0.55 + 0.45 * exp(-max(fr.y, 0.0) / 600.0)) + 0.45 * behind) * ins * (1.0 - faceK) * (0.25 + 0.75 * clump);
+      let lace2 = smoothstep(0.3, 0.6, lodNoise(vec3f(fr.x * 0.5, 0.0, fr.y * 1.5) + 7.3, max(px * 4.0 / max(sinW2, 0.05), 0.25)));
+      let chopW = ch.x * (0.55 + 0.45 * lace2) * chopK;
+      let strk = (1.0 - 0.6 * clump) * smoothstep(0.62, 0.86, lodNoise(vec3f(fr.x * 0.06, 0.0, fr.y * 0.6) + 3.1, max(px * 6.0 / max(sinW2, 0.05), 0.4))) * smoothstep(6.0, 14.0, s) * ins;
+      let white = max(max(max(crestW, foamB), max(faceFoam, max(chopW, strk * 0.75))), max(crestB, max(backF, foot)));
+      var g = mix(gW * (0.85 - 0.25 * chopK + 1.6 * ch.y * chopK), gFace, faceK);
       let patchy = 0.8 + 0.4 * lodNoise(vec3f(P.x, 0.0, P.z) * 0.02 + 6.1, max(px * 8.0, 0.6));
       let churnW = max(insP, max(faceK, crestB));
       wash = mix(wash, g * patchy * (1.0 - 0.94 * white) * inkGain * (1.0 - mist), churnW);
@@ -1386,32 +1433,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
         let sinW2 = clamp((K.anchor.y - P.y) / max(length(P - K.anchor.xyz), 1.0), 0.004, 1.0);
         let pxPerV = sinG / max(fp, 1e-5);
         let l = log2(9.0 * uK / pxPerV); let l0 = floor(l); let tt = smoothstep(0.0, 1.0, l - l0);
-        var crest = 0.0; var trough = 0.0;
-        for (var L = 0; L < 2; L++) {
-          // one breaking crest per cell of a staggered world lattice: an arc of random width and offset, white on its
-          // top edge, a dark trough in its lee (toward the viewer), the rest of the cell the churned grey
-          let lev = l0 + f32(L);
-          let wl = select(tt, 1.0 - tt, L == 0);
-          if (wl < 0.01) { continue; }
-          let Sv = exp2(lev); let Su = Sv * 3.6 * max(sinW2, 0.03);
-          let g = vec2f(q2.x / Su, q2.y / Sv); let gi = floor(g);
-          var c0 = 0.0; var t0 = 0.0;
-          for (var j = -1; j <= 1; j++) {
-            for (var i = -1; i <= 1; i++) {
-              let cid = gi + vec2f(f32(i), f32(j));
-              let h = h43(vec3i(vec2i(cid), i32(lev) * 7 + 811));
-              if (h.w < 0.1) { continue; }
-              let cc = (cid + vec2f(0.5 * fmodp(cid.y, 2.0) + h.x * 0.6, 0.3 + 0.4 * h.y)) * vec2f(Su, Sv);
-              let vv = (q2 - cc) / vec2f(Su * (0.35 + 0.4 * h.z), Sv);
-              if (abs(vv.x) > 1.0) { continue; }
-              let taper = 1.0 - vv.x * vv.x;
-              let dy = vv.y - 0.35 * taper;                         // + behind (far side), − toward the viewer
-              c0 = max(c0, smoothstep(0.3 * taper, 0.05 * taper, abs(dy + 0.05)) * taper);
-              t0 = max(t0, smoothstep(-0.05, -0.18, dy) * (1.0 - smoothstep(-0.35, -0.6, dy)) * taper);
-            }
-          }
-          crest += c0 * wl; trough += t0 * wl;
-        }
+        let ct = chopArcs(q2, sinW2, l0, tt, 3.6, 0.1);
+        var crest = ct.x; var trough = ct.y;
         let lace = smoothstep(0.35, 0.6, lodNoise(vec3f(al * 0.5, 0.0, sd * 1.5) + 2.3, max(fp * 4.0 * uK / max(sinW2, 0.05), 0.25)));
         crest *= 0.35 + 0.65 * lace;
         let nearF = exp(-max(sd, 0.0) / (22.0 * kk)) * step(0.0, sd);   // the thick white water just behind the wall
