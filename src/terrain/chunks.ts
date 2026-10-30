@@ -15,7 +15,7 @@ import { FLAG_SHADOW, INSTANCE_BYTES, CLASS_OWN, VCLASS_OWN, VCLASS_PAVE_BLEND, 
 export const VCLASS_TERRAIN = 1 << 18, VCLASS_FAR = 1 << 19, VCLASS_SKIRT = 1 << 20;
 
 /** a grid of n × n cells on the unit square (x, z), its skirt ring after it; uv.x carries n (the shaders' cell size) */
-function gridMesh(name: string, n: number, cls: number, tone: number, bits: number): MeshData {
+export function gridMesh(name: string, n: number, cls: number, tone: number, bits: number): MeshData {
   const pos: number[] = [], vcls: number[] = [], uvs: number[] = [], idx: number[] = [];
   const vert = (i: number, k: number, skirt: boolean) => {
     pos.push(i / n, 0, k / n);

@@ -164,6 +164,15 @@ A scene the size of a city does not fit one file or one upload:
   a painted tidal bore's front, `[x0, z0, x1, z1, crest height far, near, crest length, bow]` (bow: how far the front
   bends ahead of the line between its ends, mid-river, in m; 0 straight), for the churned water about it and the paint
   of its class-17 wall). `sun` at the top level is the first look's.
+* **Water: a modelled surface** (`water[i].surface`, the first one that has it): within `region` the flat plane gives
+  way to a grid the engine lifts on the GPU (src/water/surface.ts, src/shaders/water.wgsl) — short crested waves and,
+  optionally, a breaking front standing across the water as the water itself, so a bore's wall rises out of the waves
+  with no seam:
+  `"surface": { "region": [x0, z0, x1, z1], "waves": [height ahead m, length m, height just behind the front m, its
+  calming distance m], "looks": [9], "front": { "a": [x, z], "b": [x, z], "toward": [x, z], "height": [first part,
+  at b], "period": m, "bow": m } }`. `looks` (absent: all) limits it to a look's own staging; `front` follows
+  `boreFront` above (the face toward `toward`, its section linan's ink bore's). The waves calm toward the region's edge
+  over 150 m. The grid's chunks are ¾ m cells along the front, 3 m elsewhere.
 
 ## Packed scenes
 

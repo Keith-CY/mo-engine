@@ -45,6 +45,11 @@ struct Frame {
   fieldFar: vec4f,        // the far one
   fieldFarB: vec4f,
   occl: vec4f,            // occlusion culling: the depth pyramid's first level (w, h texels), its levels, 1 when on
+  waterA: vec4f,          // the modelled water surface (src/shaders/water.wgsl): its region (x0, z0, x1, z1)
+  waterB: vec4f,          // … the water's level, the waves' height ahead of the front, their length, 1 when there is one
+  waterC: vec4f,          // … the front's ends (a.xz, b.xz; 0 none)
+  waterD: vec4f,          // … its crest height over its first part and at b, a crest's length, its bow (m)
+  waterE: vec4f,          // … the side it faces (x, z), the waves' height just behind it, their calming distance (m)
 };
 
 const CASCADES = 2u;

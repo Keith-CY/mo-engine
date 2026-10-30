@@ -7,6 +7,7 @@
  */
 import FRAME from '../shaders/frame.wgsl';
 import COMMON from '../shaders/p2/common.wgsl';
+import WATER from '../shaders/water.wgsl';
 import TONE_PASS from '../shaders/p2/tone.wgsl';
 import BLUR from '../shaders/p2/blur.wgsl';
 import LIGHT from '../shaders/p2/light.wgsl';
@@ -75,7 +76,7 @@ export class Painter2 {
     const consts = Object.entries(TONE).map(([k, v]) => `const TONE_${k} = ${Number(v).toFixed(6)};`).join('\n') + '\n' +
       Object.entries(this.features).map(([k, v]) => `const F_${k.toUpperCase()} = ${v ? 'true' : 'false'};`).join('\n');
     const mk = (label: string, code: string, format: GPUTextureFormat, common = true) => {
-      const m = d.createShaderModule({ label, code: common ? `${FRAME}\n${COMMON}\n${consts}\n${code}` : code });
+      const m = d.createShaderModule({ label, code: common ? `${FRAME}\n${WATER}\n${COMMON}\n${consts}\n${code}` : code });
       return d.createRenderPipelineAsync({ label, layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     };
     const [tone, blur, light, edge, jfa, ridge, paint, wet] = await Promise.all([

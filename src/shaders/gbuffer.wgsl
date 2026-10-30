@@ -123,6 +123,26 @@ fn billboardShape(shape: u32, q: vec2f, seed: f32) -> vec2f {
   }
   return vec2f(a, dark);
 }
+/** a water grid vertex (eye-relative, on the plane) lifted onto the modelled surface (src/shaders/water.wgsl), with
+ *  its normal there; `n`: the grid's cells a side, `span`: the chunk's size (m) */
+fn liftWater(rel0: vec3f, vcls: u32, n: f32, span: f32) -> Lifted {
+  let xz = rel0.xz + F.eye.xz;
+  let c = max(span / max(n, 1.0), 0.25);
+  // (over the bank's shallows the troughs stop short of the bed — a smooth floor — or the bed showed through them)
+  let A = F.fieldNear;
+  let inNear = F.fieldNearB.y > 0.5 && all(xz > A.xy) && all(xz < A.xy + A.z * (vec2f(A.w, F.fieldNearB.x) - 1.0));
+  var bed = select(select(-1e3, fieldHeight(true, xz), F.fieldFarB.y > 0.5), fieldHeight(false, xz), inNear) - F.waterB.x + 0.2;
+  bed = min(bed, -0.1);   // (on land the water stays under the ground)
+  let floorW = 0.4;
+  var h = wsHeight(xz);
+  let hx = wsHeight(xz + vec2f(c, 0.0)); let hz = wsHeight(xz + vec2f(0.0, c));
+  let fl = (vec3f(h, hx, hz) - bed) / floorW;
+  let lifted = bed + floorW * select(fl, log(1.0 + exp(fl)), fl < vec3f(8.0));
+  h = lifted.x;
+  let nW = normalize(vec3f(h - lifted.y, c, h - lifted.z));
+  if ((vcls & VC_SKIRT) != 0u) { h -= 1.0 + 0.5 * c; }
+  return Lifted(vec3f(rel0.x, F.waterB.x + h - F.eye.y, rel0.z), nW);
+}
 @group(1) @binding(0) var<storage, read> inst: array<u32>;
 @group(1) @binding(1) var<storage, read> visible: array<u32>;
 @group(1) @binding(2) var<storage, read> lodState: array<u32>;
@@ -152,7 +172,7 @@ struct VOut {
   // dissolving between levels: how far (0 … 1), and whether this draw is the level coming (1) or going (−1)
   @location(7) @interpolate(flat) fade: vec2f,
   @location(8) uv: vec2f,
-  // bit 0 alpha-tested, bit 1 terrain paving from the paths, bits 8–15 the surface pattern, 16–31 the world's surface kind
+  // bit 0 alpha-tested, bit 1 terrain paving from the paths, bit 2 the modelled water's grid, bits 8–15 the surface pattern, 16–31 the world's surface kind
   @location(9) @interpolate(flat) flags: u32,
   @location(10) paint: vec3f,
   @location(11) @interpolate(flat) tmul: f32,
@@ -184,6 +204,8 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
   }
   // terrain: the grid lifted onto its field (src/shaders/terrain.wgsl)
   if ((vcls & VC_TERRAIN) != 0u) { let L = liftTerrain(rel, vcls, uv.x, length(X)); rel = L.rel; o.nW = L.nW; }
+  // the modelled water: the grid lifted onto its waves and its front
+  if ((vcls & VC_WATER) != 0u) { let L = liftWater(rel, vcls, uv.x, length(X)); rel = L.rel; o.nW = L.nW; }
   rel.y += D.lift * length(rel);
   o.pos = F.viewProj * vec4f(rel, 1.0);
   o.rel = rel;
@@ -193,7 +215,7 @@ fn vs(@location(0) p: vec3f, @location(1) n: vec3f, @location(2) tone: f32, @loc
   let vc = vcls & 0xffffu;
   o.cls = select(ic, select(vc, D.cls, vc == 0xffffu), ic == 0xffffffffu);
   o.uv = uv;
-  o.flags = ((vcls >> 16u) & 1u) | (((vcls >> 17u) & 1u) << 1u) | ((vcls >> 24u) << 8u);
+  o.flags = ((vcls >> 16u) & 1u) | (((vcls >> 17u) & 1u) << 1u) | (((vcls >> 21u) & 1u) << 2u) | ((vcls >> 24u) << 8u);
   // terrain: the class comes from the paving map, sampled per pixel at the world point (the same smooth path edge at
   // every terrain level)
 
@@ -261,6 +283,8 @@ fn fs(v: VOut, @builtin(front_facing) front: bool) -> GOut {
   let bench = u32(F.layering.z + 0.5);
   if ((bench & 8u) != 0u) { var q: GOut; q.a = vec4f(0.0, 0.0, v.depth, f32(v.cls)); q.b = vec4f(1.0, 1.0, v.tone, 1.0); q.c = vec4u(v.seed, v.id, 0u, 0u); return q; }
   if (alpha == 1u && a < D.cutoff && (bench & 4u) == 0u) { discard; }
+  // the water plane gives way to the modelled surface within its region
+  if (v.cls == 3u && (v.flags & 4u) == 0u && wsOn() && all(wp.xz > F.waterA.xy) && all(wp.xz < F.waterA.zw) && abs(wp.y - F.waterB.x) < 0.5) { discard; }
   // a flowering crown is mostly air, as the references paint it: clusters of blossom along the limbs with the ground
   // and the sky between them (holes in smooth world-anchored noise, so they hold still as the eye moves)
   // (only where the holes are a few pixels across — finer, they would shimmer as the eye moves — shrinking away

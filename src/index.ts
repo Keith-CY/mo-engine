@@ -7,5 +7,6 @@ export { NoWebGPU } from './gpu/device';
 export { DEFAULT_STYLE, packStyle, type InkStyle, type ClassStyle, type Look } from './ink/style';
 export { loadMoScene, type LoadOptions } from './scene/loader';
 export { addTerrain, groundAt } from './terrain/chunks';
+export { addWaterSurface } from './water/surface';
 export { syntheticTown } from './scene/synthetic';
-export { CLS, heightAt, writeInstance, INSTANCE_BYTES, type SceneData, type MeshData, type Viewpoint, type Heightfield } from './scene/types';
+export { CLS, heightAt, writeInstance, INSTANCE_BYTES, type SceneData, type MeshData, type Viewpoint, type Heightfield, type WaterSurface } from './scene/types';

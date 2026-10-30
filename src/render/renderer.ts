@@ -18,11 +18,13 @@ import RESOLVE from '../shaders/resolve.wgsl';
 import PRESENT from '../shaders/present.wgsl';
 import SHADOW from '../shaders/shadow.wgsl';
 import TERRAIN from '../shaders/terrain.wgsl';
+import WATER from '../shaders/water.wgsl';
+import { waterUniforms } from '../water/surface';
 import SURFACES from '../shaders/surfaces.wgsl';
 import HIZ from '../shaders/hiz.wgsl';
 import { Painter2 } from './painter2';
 
-const FRAME_FLOATS = 296;
+const FRAME_FLOATS = 316;
 /** the sun's shadow cascades: half size (m) of each box around the eye, map size (texels), depth half range (m) */
 const CASCADE_RADII = [80, 450], SHADOW_SIZE = 2048, SHADOW_DEPTH = 1500;
 const DRAW_STRIDE = 256;
@@ -230,7 +232,10 @@ export class Renderer {
   /** the season the world is painted in: meshes out of it are not drawn */
   setSeason(season: string): void { this.scene?.setSeason(this.device, season); this.shadowKeys = []; }
   /** the look painted now: meshes staged for other looks are not drawn */
-  setLookId(id: number): void { this.scene?.setLook(this.device, id); this.shadowKeys = []; }
+  setLookId(id: number): void {
+    this.scene?.setLook(this.device, id); this.shadowKeys = [];
+    if (this.sceneData) this.waterInfo.set(waterUniforms(this.sceneData, id));
+  }
   /** the viewpoint the eye stands at (−1: none): its stage is drawn, what the stage moves is not */
   setStage(id: number): void { this.scene?.setStage(this.device, id); this.shadowKeys = []; }
 
@@ -239,7 +244,7 @@ export class Renderer {
   private gbufferDesc(surfaces: string, opaque = false): GPURenderPipelineDescriptor {
     const d = this.device;
     // (the surface functions may take derivatives inside their branches: anti-aliasing a pattern)
-    let code = 'diagnostic(off, derivative_uniformity);\n' + FRAME + '\n' + GBUFFER + '\n' + TERRAIN + '\n' + surfaces;
+    let code = 'diagnostic(off, derivative_uniformity);\n' + FRAME + '\n' + WATER + '\n' + GBUFFER + '\n' + TERRAIN + '\n' + surfaces;
     // the opaque variant has no discard at all, so the GPU removes hidden surfaces before shading them (a shader that
     // may discard keeps every fragment of every draw it shades): the meshes with no alpha mask, not dissolving
     if (opaque || this.benchNoDiscard) code = code.replace(/\bdiscard;/g, '{}');
@@ -393,6 +398,9 @@ export class Renderer {
   /** the heightfields as textures the terrain's vertices are lifted from (src/shaders/terrain.wgsl) */
   private fieldTex: (GPUTexture | undefined)[] = [undefined, undefined];
   private fieldInfo = new Float32Array(16);
+  /** the modelled water surface's uniforms (src/water/surface.ts) */
+  private waterInfo = new Float32Array(20);
+  private sceneData?: SceneData;
   private fieldView(k: number): GPUTextureView {
     if (!this.fieldTex[k]) {
       const t = this.device.createTexture({ label: 'mo field (none)', size: [1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
@@ -464,6 +472,8 @@ export class Renderer {
     const s = (this.scene = new GpuScene(d, data));
     this.meshNames = data.meshes.map((m) => m.name);
     this.uploadFields(data);
+    this.sceneData = data;
+    this.waterInfo.set(waterUniforms(data));
     this.uploadPave(data);
     this.uploadPaths(data);
     if (this.targets && this.passBGs) this.passBGs.ink = this.inkBindGroup(this.targets);
@@ -596,6 +606,7 @@ export class Renderer {
     f.set(this.fieldInfo, 276);
     const hz = this.targets?.hiz;
     f.set([hz?.width ?? 1, hz?.height ?? 1, hz?.mipLevelCount ?? 1, this.occlBits], 292);
+    f.set(this.waterInfo, 296);
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
     this.unjittered.set(unjittered);
     this.prevViewProj.set(unjittered);

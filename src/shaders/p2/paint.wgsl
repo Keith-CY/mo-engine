@@ -1052,6 +1052,8 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let rt = pow(clamp(rl * K.sh1.z, 0.0, 1.0), K.sh1.w);
       var rk = exp(-RG.b / (45.0 + 25.0 * K.look5.x)) * (1.0 - smoothstep(150.0, 235.0, RG.b) * step(0.001, K.look5.x)) * (0.75 + 0.5 * lodNoise(vec3f(dot(P, camR) * 0.08, 0.0, dot(P, camF)) + 5.5, fp * 30.0 * uK));
       rk *= K.waterRefl.x * select(1.0, exp(-RG.b / K.waterRefl.y), K.waterRefl.y > 0.0);
+      // (none on the modelled water: its waves break the shore's reflection, ink09)
+      if (wsOn()) { rk *= 1.0 - wsInside(P.xz, 700.0); }
       w1 = max(w1, smoothstep(0.25, 0.75, 1.0 - rt) * 0.75 * rk * (1.0 - 0.7 * path) * inkGain);
     }
   }
@@ -1316,7 +1318,60 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // about the painted bore the river churns (ink09): a grey wash broken by rows of white crests (paper) with dark
     // troughs under them, calming with distance from the front; the churned rows spread far behind the wall and the
     // spent foam runs on ahead of its foot toward the bank, in the front's own frame, scaled by the wall's height
-    if (K.bore0.x != 0.0 && match_) {
+    if (K.bore0.x != 0.0 && match_ && wsOn() && wsHasFront()) {
+      // the modelled river (src/shaders/water.wgsl): its waves and the front are one surface, painted from its own
+      // heights — the crests of the waves white (paper), their lee and troughs grey, rougher and darker behind the front;
+      // the front the same water risen: its crest and the foam heaped on its back paper, its face grey with foam pouring
+      // down it, white water at its foot running out into the waves ahead; no line anywhere between wall and sea
+      let fr = wsFront(P.xz);
+      let ends = wsEnds(fr.x);
+      let H = max(fr.z, 1.0); let k = H / 16.0; let s = fr.y / k;   // s: ahead of the crest line, profile units
+      let sec = wsSection(s) * ends;
+      let ins = wsInside(P.xz, 150.0);
+      let insP = wsInside(P.xz, 700.0);   // (the paint fades over a wider margin: far off 150 m is a line)
+      let hW = P.y - F.waterB.x;
+      let amp = max(wsAmp(fr, ends), 0.05);
+      let wv = (hW - H * sec * ins) / (amp * 1.3 * max(ins, 0.05));    // the waves alone, about −0.5 … 1
+      let slope = 1.0 - clamp(Nw.y, 0.0, 1.0);
+      // (the side of a wave turned toward the eye: the lee the viewer looks into, darker)
+      let toEye = -dot(normalize(Nw.xz + vec2f(1e-5)), normalize(dirW.xz + vec2f(1e-5))) * length(Nw.xz);
+      let px = max(fp * uK, 1e-4);
+      let behind = smoothstep(2.0, -8.0, s) * ends;
+      let near = exp(-abs(fr.y) / 120.0) * ends;
+      // the waves: white crests (a lace, broken), grey troughs and lee sides
+      let lace = smoothstep(0.3, 0.62, lodNoise(vec3f(P.x, 0.0, P.z) * 0.35 + 2.3, max(px * 3.0, 0.25)));
+      let crestW = smoothstep(0.3 + 0.1 * (1.0 - near), 0.7, wv) * (0.45 + 0.55 * lace) * (0.65 + 0.35 * max(near, behind));
+      let trough = smoothstep(0.1, -0.45, wv);
+      // (the waters grey toward the far shores, the river ahead of the front paler, ink09)
+      let farA = exp(-max(fr.y, 0.0) / 450.0);
+      let gW = (0.12 + 0.12 * farA + 0.22 * behind + 0.08 * near) * (0.6 + 0.8 * trough + 0.8 * smoothstep(0.0, 0.25, toEye) * smoothstep(0.02, 0.2, slope));
+      // the front: the crest band and its back paper, the hollow under the crest grey, foam pouring down the face, the
+      // white water at its foot torn into the waves
+      let yr = hW / H;
+      let crestB = smoothstep(0.62, 0.86, yr) * smoothstep(7.5, 4.5, s) * ends;
+      let backF = smoothstep(-45.0 - 25.0 * lodNoise(vec3f(fr.x * 0.05, 0.0, 0.0) + 1.0, 1.0), -4.0, s) * smoothstep(5.0, 1.0, s) * ends;
+      let faceK = smoothstep(4.2, 5.2, s) * (1.0 - smoothstep(10.0, 14.0, s)) * (1.0 - crestB) * ends;
+      let fq = vec2f(fr.x, P.y);
+      let l = log2(px * 30.0); let l0 = floor(l); let lt2 = smoothstep(0.0, 1.0, l - l0);
+      let pd = clamp(0.4 + 0.35 * (1.0 - yr), 0.0, 0.9) * mix(0.5, 1.2, vnoise2(vec2f(fr.x / (H * 0.9), 5.7)));
+      let pour = mix(streakLevel(fq, vec2f(0.0, -1.0), exp2(l0), pd, 1.0, l0 + 60.0), streakLevel(fq, vec2f(0.0, -1.0), exp2(l0 + 1.0), pd, 1.0, l0 + 61.0), lt2);
+      let hollow = smoothstep(0.3, 0.6, yr) * (1.0 - smoothstep(0.7, 0.86, yr));
+      let gFace = (0.12 + 0.22 * hollow * fr.w) * (1.0 - 0.75 * pour);
+      // (the face itself mostly foam: grey shows through it in torn patches, never as a band along the front)
+      let faceN = lodNoise(vec3f(fr.x * 0.4, P.y * 0.8, 0.0) + 3.7, max(px * 3.0, 0.2));
+      let faceFoam = faceK * smoothstep(0.38, 0.62, faceN + 0.25 * (1.0 - hollow));
+      let footN = lodNoise(vec3f(fr.x * 0.25, 0.0, fr.y * 0.6) + 5.0, max(px * 4.0, 0.3));
+      let foot = smoothstep(14.0 + 30.0 * footN, 6.0, s) * smoothstep(4.0, 6.0, s) * smoothstep(0.4, 0.62, footN + 0.35 * smoothstep(24.0, 6.0, s)) * ends;
+      // foam behind in torn patches over the waves, thick by the crest and thinning away
+      let fN = lodNoise(vec3f(fr.x, 0.0, fr.y * 3.0) + 9.7, max(28.0, px * 6.0)) * 0.65 + lodNoise(vec3f(fr.x, 0.0, fr.y * 3.0) + 4.1, max(9.0, px * 3.0)) * 0.35;
+      let foamB = smoothstep(0.62 - 0.25 * exp(min(fr.y, 0.0) / 90.0), 0.72, fN) * behind * (0.5 + 0.5 * lace);
+      let white = max(max(max(crestW, foamB), faceFoam), max(crestB, max(backF, foot)));
+      var g = mix(gW, gFace, faceK);
+      let patchy = 0.8 + 0.4 * lodNoise(vec3f(P.x, 0.0, P.z) * 0.02 + 6.1, max(px * 8.0, 0.6));
+      let churnW = max(insP, max(faceK, crestB));
+      wash = mix(wash, g * patchy * (1.0 - 0.94 * white) * inkGain * (1.0 - mist), churnW);
+      wave *= 1.0 - churnW;
+    } else if (K.bore0.x != 0.0 && match_) {
       let BF = boreFrame(P);
       // (sized in metres, not by the wall: the water stands only 7-12 m, its churn spreads hundreds of metres, ink09)
       let kk = 2.4;
@@ -1397,7 +1452,10 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let lt = mix(mix(plB, LL.y, 0.4), smoothstep(0.05, 0.65, sunF), 0.15);
     // (the spray thrown up above the crest is lit through: its billows a soft grey where they turn from the light, never
     // the shaded water's darks)
-    let shK = (1.0 - smoothstep(0.3, 0.85, lt)) * (1.0 - 0.45 * smoothstep(0.9, 1.2, yr));
+    var shK = (1.0 - smoothstep(0.3, 0.85, lt)) * (1.0 - 0.45 * smoothstep(0.9, 1.2, yr));
+    // (on the modelled water the foam below the crest is lit through as well: its terminator ran the length of the
+    // front as a thin dark line between the wall and the water)
+    if (wsOn()) { shK *= smoothstep(0.85, 1.15, yr); }
     let under = smoothstep(-0.05, -0.5, Nw.y) * (1.0 - smoothstep(0.95, 1.08, P.y / max(BF.z, 1.0)));  // the curl's underside (not a burst's)
     let apron = (1.0 - smoothstep(0.07, 0.17, yr)) * smoothstep(8.0, 11.0, fw);
     let faceK = smoothstep(0.1, 0.45, toV) * (1.0 - apron) * (1.0 - smoothstep(0.86, 0.97, yr));
@@ -1412,8 +1470,14 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // streaks of foam pouring down; where the crest spills the whole face is white foam streaked with grey; the trough
     // at its foot a grey band where it rises from the water
     let ck = BF.w;
-    let hollow = smoothstep(0.42, 0.74, yr) * (1.0 - smoothstep(0.84, 0.93, yr));
-    let trough = 1.0 - smoothstep(0.02, 0.22, yr);
+    var hollow = smoothstep(0.42, 0.74, yr) * (1.0 - smoothstep(0.84, 0.93, yr));
+    var trough = 1.0 - smoothstep(0.02, 0.22, yr);
+    // (standing in the modelled water the face is foam heaped on the water's own face: its greys torn into patches, no
+    // band along the front, so the foam runs into the water below without a line)
+    if (wsOn()) {
+      let bm = smoothstep(0.45, 0.7, lodNoise(vec3f(BF.x * 0.22, P.y * 0.45, BF.y * 0.2) + 11.0, max(px * 4.0, 0.25)));
+      hollow *= bm; trough *= bm * 0.6;
+    }
     // (each crest its own hollow, deep where it curls hardest and broken where foam spills over the lip: one dark band
     // the whole length of the front reads as a rail, the streaks under it as a fence's palings)
     let crestV = smoothstep(0.25, 0.75, vnoise2(vec2f(BF.x / (H * 1.7), 3.3))) * 0.7 + 0.3 * smoothstep(0.3, 0.7, vnoise2(vec2f(BF.x / (H * 0.5), 8.1)));

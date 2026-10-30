@@ -138,7 +138,8 @@ export interface SceneData {
   instanceCount: number;
   /** heightfields; `drawn: false` when the scene has its own ground meshes and the fields only carry the walker */
   terrain?: { near?: Heightfield; far?: Heightfield; cls: number; drawn?: boolean };
-  water: { name: string; level: number; mesh: number }[];
+  /** the water planes; one may model its surface in a region (src/water/surface.ts, docs/SCENE_FORMAT.md, Water) */
+  water: { name: string; level: number; mesh: number; surface?: WaterSurface }[];
   textures?: TextureData[];
   /** slab paths along centre lines (world X, Z): the ground within halfWidth and above `crown` m is paved, in courses
    *  `slab` m long */
@@ -150,6 +151,22 @@ export interface SceneData {
   walk?: WalkData;
   /** the world's surface functions (WGSL defining surfaceTone(s: Surface) -> f32), compiled into the G-buffer */
   surfaces?: string;
+}
+
+/** a water surface modelled in a region (docs/SCENE_FORMAT.md, Water): a grid lifted by short crested waves and,
+ *  optionally, a breaking front (a bore) standing across it */
+export interface WaterSurface {
+  /** the region, world (x0, z0, x1, z1): the plane gives way to the surface within it */
+  region: [number, number, number, number];
+  /** the waves: their height ahead of the front (m), their length (m), their height just behind the front (m), the
+   *  distance (m) over which that falls back to the height ahead; the waves calm toward the region's edge */
+  waves?: [number, number, number, number];
+  /** the front: its ends (x, z), a point on the side it faces, its crest height over the first part (to 30 % of its
+   *  length) and at its second end (m), the length of one crest along it (m), its bow ahead of the line between its
+   *  ends (m) */
+  /** the looks (ids) it is modelled in (absent: all); in the others the plane is flat */
+  looks?: number[];
+  front?: { a: [number, number]; b: [number, number]; toward: [number, number]; height: [number, number]; period: number; bow: number };
 }
 
 export const INSTANCE_BYTES = 64;

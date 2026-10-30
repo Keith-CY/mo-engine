@@ -91,6 +91,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
     if (c == C_ROOF && cb == C_ROOF) { tS = mix(0.6, 0.06, eave); }
     if (c == C_CITYFAR && cb == C_CITYFAR) { tS = 0.2; }
     if (c == C_WAVE && cb == C_WAVE) { tS = 99.0; }   // (the bore's broken face draws no inner lines: the curls are painted)
+    // (on the modelled water the foam melts into the water it stands in: no line between them)
+    let melt = c == C_WAVE && cb == C_WATER && wsOn();
+    if (melt) { tS = 99.0; }
     let sil = smoothstep(tS, tS * 2.5, lap) * step(D * 1.01, bz);
     // class boundary (the nearer side draws it); water edges belong to the land
     var cl = 0.0;
@@ -99,6 +102,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
       if (fol && isFol(cb)) { cl = 0.0; }
       if (fol && !isFol(cb)) { cl *= 0.6; }
       if (cb == C_WATER) { cl *= 0.55; }
+      if (melt) { cl = 0.0; }
       if ((c == C_GROUND && cb == C_SMALL) || (c == C_SMALL && cb == C_GROUND)) { cl *= 0.15; }
       if (c == C_GROUND && isTree(cb)) { cl *= 0.4; }
       if (isArch(c) && isArch(cb)) { cl *= 0.8; }

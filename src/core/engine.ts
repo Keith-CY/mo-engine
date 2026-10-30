@@ -10,6 +10,7 @@ import { DEFAULT_STYLE, type InkStyle } from '../ink/style';
 import { Walker } from '../controls/walker';
 import type { LookData, SceneData, Viewpoint } from '../scene/types';
 import { addTerrain } from '../terrain/chunks';
+import { addWaterSurface } from '../water/surface';
 import { Walkable } from '../controls/walkable';
 
 export interface EngineOptions {
@@ -52,6 +53,7 @@ export class Engine {
 
   setScene(data: SceneData): FrameStats {
     if (data.terrain && data.terrain.drawn !== false) addTerrain(data);
+    addWaterSurface(data);
     this.scene = data;
     this.renderer.sun = data.sun;
     this.sceneStats = this.renderer.setScene(data);

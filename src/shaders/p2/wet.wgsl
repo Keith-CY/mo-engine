@@ -53,7 +53,9 @@ fn fs(v: VOut) -> @location(0) vec4f {
   let uK = size.x / 1664.0;
   let A = textureLoad(gA, p, 0);
   let cls = clsOf(A);
-  if (cls == C_WATER && W.r.x > 0.0) { c0 = vec4f(mirror(c0.rgb, v.pos.xy, size, uK, p), c0.a); }
+  // (no mirror on the modelled water: its waves break any reflection of the shore, ink09)
+  let chop = select(0.0, wsInside((relPosOf(uv, depthOf(A)) + F.eye.xyz).xz, 700.0), wsOn() && cls == C_WATER);
+  if (cls == C_WATER && W.r.x > 0.0 && chop < 1.0) { c0 = vec4f(mix(mirror(c0.rgb, v.pos.xy, size, uK, p), c0.rgb, chop), c0.a); }
   if (W.p.x <= 0.0) { return c0; }
   let L0 = lum(c0.rgb);
   // the paper's damp: broad patches, wetter and drier, with a finer fibre in them

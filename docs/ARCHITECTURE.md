@@ -51,6 +51,7 @@ ink/        the painter: paper, washes, lines, marks, mist — fed by the G-buff
 render/     frame graph: shadow cascades → G-buffer → light → ink → temporal resolve → present
 scene/      the scene file loader, GPU pools (geometry, instances), culling + LOD in compute, indirect draws
 terrain/    heightfield terrain (near detail grid + far grid), meshed on the GPU around the eye
+water/      a modelled water surface: a grid lifted by crested waves and a breaking front, one surface
 gpu/        device, buffers, textures, pipeline cache (async, warmed up), bind groups, timers
 core/       Engine (canvas, resize, frame loop), Camera (pose → view, projection), math, events
 ```
@@ -105,6 +106,15 @@ Two heightfields: near (≈1 m cells over the world's walkable region) and far (
 A fixed grid of tiles around the eye, nested rings of doubling cell size (geometry clipmap), samples them in the vertex
 shader; ring transitions morph by distance (no popping). Normals come from the heightfield. A class map (ground,
 paving, rock) can ride along.
+
+### Water
+
+The water is a plane at its level, except where a scene models its surface (`water[i].surface`): there the plane gives
+way to grid chunks, the terrain's own grid meshes, lifted in the vertex shader by crested waves and by a breaking front
+(a bore) whose section is the water itself rising — face, crest and the raised churned water behind — so a wall grows
+out of the waves with no seam between them. The chunks along the front are a quarter the size of the rest. The painter
+reads the same model (src/shaders/water.wgsl) to paint the crests, troughs and the wall from the surface's own
+heights.
 
 ## 7. Ink
 
