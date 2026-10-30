@@ -1322,15 +1322,15 @@ fn fs(v: VOut) -> @location(0) vec4f {
       let kk = 2.4;
       let al = BF.x; let sd = -BF.y;                                 // sd: + behind the front (away from the camera)
       let bl = length(K.bore0.zw - K.bore0.xy);
-      let inside = smoothstep(-20.0, 10.0, al) * (1.0 - smoothstep(bl - 10.0, bl + 30.0, al));
-      let churnB = smoothstep(-4.0, 6.0, sd) * (0.35 + 0.65 * exp(-max(sd, 0.0) / (60.0 * kk))) * (1.0 - smoothstep(200.0 * kk, 420.0 * kk, sd));
+      let inside = smoothstep(-260.0, 10.0, al - 0.6 * max(sd, 0.0)) * (1.0 - smoothstep(bl - 10.0, bl + 160.0, al + 0.6 * max(sd, 0.0)));
+      let churnB = smoothstep(-4.0, 6.0, sd) * (0.6 + 0.4 * exp(-max(sd, 0.0) / (60.0 * kk))) * (1.0 - smoothstep(300.0 * kk, 700.0 * kk, sd));
       let churnA = step(sd, 0.0) * (1.0 - smoothstep(40.0 * kk, 150.0 * kk, -sd)) * 0.8;
       let churn = max(churnB, churnA) * inside;
       if (churn > 0.001) {
         let q2 = vec2f(al, sd);
         let sinW2 = clamp((K.anchor.y - P.y) / max(length(P - K.anchor.xyz), 1.0), 0.004, 1.0);
         let pxPerV = sinG / max(fp, 1e-5);
-        let l = log2(16.0 * uK / pxPerV); let l0 = floor(l); let tt = smoothstep(0.0, 1.0, l - l0);
+        let l = log2(9.0 * uK / pxPerV); let l0 = floor(l); let tt = smoothstep(0.0, 1.0, l - l0);
         var crest = 0.0; var trough = 0.0;
         for (var L = 0; L < 2; L++) {
           // one breaking crest per cell of a staggered world lattice: an arc of random width and offset, white on its
@@ -1351,29 +1351,33 @@ fn fs(v: VOut) -> @location(0) vec4f {
               if (abs(vv.x) > 1.0) { continue; }
               let taper = 1.0 - vv.x * vv.x;
               let dy = vv.y - 0.35 * taper;                         // + behind (far side), − toward the viewer
-              c0 = max(c0, smoothstep(0.2 * taper, 0.0, abs(dy + 0.05)) * taper);
+              c0 = max(c0, smoothstep(0.3 * taper, 0.05 * taper, abs(dy + 0.05)) * taper);
               t0 = max(t0, smoothstep(-0.05, -0.18, dy) * (1.0 - smoothstep(-0.35, -0.6, dy)) * taper);
             }
           }
           crest += c0 * wl; trough += t0 * wl;
         }
+        let lace = smoothstep(0.35, 0.6, lodNoise(vec3f(al * 0.5, 0.0, sd * 1.5) + 2.3, max(fp * 4.0 * uK / max(sinW2, 0.05), 0.25)));
+        crest *= 0.35 + 0.65 * lace;
+        let nearF = exp(-max(sd, 0.0) / (22.0 * kk)) * step(0.0, sd);   // the thick white water just behind the wall
         // the spent foam ahead: long streaks of white along the front on a paler grey, fewer dark troughs
         let ahead = step(sd, 0.0);
-        let streak = smoothstep(0.55, 0.8, lodNoise(vec3f(al * 0.06, 0.0, sd * 0.6) + 3.1, max(fp * 6.0 * uK / max(sinW2, 0.05), 0.4))) * ahead;
+        let streak = smoothstep(0.62, 0.85, lodNoise(vec3f(al * 0.06, 0.0, sd * 0.6) + 3.1, max(fp * 6.0 * uK / max(sinW2, 0.05), 0.4))) * ahead;
         // the broken white water behind: foam in torn patches, thick by the front and thinning away from it (the crests'
         // lattice alone read as fish scales)
         // (patches ~25 m along the front and a third of that across it, never finer than a few pixels)
         let fpx = fp * uK * 3.0;
         let fq3 = vec3f(al, 0.0, sd * 3.0);
         let fN = lodNoise(fq3 + 9.7, max(28.0, fpx * 2.0)) * 0.65 + lodNoise(fq3 + 4.1, max(9.0, fpx)) * 0.35;
-        let foamB = smoothstep(0.6 - 0.2 * exp(-max(sd, 0.0) / (45.0 * kk)), 0.7, fN) * (1.0 - ahead);
-        let g0 = mix(0.24 + 0.3 * trough, 0.2 + 0.12 * trough, ahead) * (0.75 + 0.35 * exp(-abs(sd) / (50.0 * kk)));
-        wash = mix(wash, g0 * (1.0 - 0.85 * max(max(crest, streak * 0.8), foamB)) * inkGain * (1.0 - mist), churn);
+        let foamB = smoothstep(0.55 - 0.2 * exp(-max(sd, 0.0) / (45.0 * kk)), 0.68, fN) * (1.0 - ahead) * (0.5 + 0.5 * lace);
+        let patchy = 0.75 + 0.5 * lodNoise(vec3f(al * 0.04, 0.0, sd * 0.12) + 6.1, max(fp * 8.0 * uK, 0.6));
+        let g0 = patchy * mix(0.42 + 0.45 * trough, 0.3 + 0.2 * trough, ahead) * (0.75 + 0.35 * exp(-abs(sd) / (50.0 * kk)));
+        wash = mix(wash, g0 * (1.0 - 0.92 * max(max(crest, streak * 0.8), max(foamB, nearF * (0.55 + 0.45 * lace)))) * inkGain * (1.0 - mist), churn);
         wave *= 1.0 - churn;
       }
       // white water at the foot of the face (under its apron): the wash lifts to paper
-      let foam = (1.0 - smoothstep(0.0, 22.0 * kk, -sd)) * step(sd, 0.0) * inside;
-      wash *= 1.0 - 0.8 * foam; wave *= 1.0 - foam;
+      let foam = (1.0 - smoothstep(0.0, 8.0 * kk, -sd)) * step(sd, 0.0) * inside;
+      wash *= 1.0 - 0.6 * foam; wave *= 1.0 - foam;
     }
     if (K.sh2.w < 0.5) { wave *= exp(-RG.b / 28.0); }
     else { wave *= max(smoothstep(0.15, 0.8, fK), exp(-RG.b / 10.0)); }
@@ -1394,7 +1398,7 @@ fn fs(v: VOut) -> @location(0) vec4f {
     // (the spray thrown up above the crest is lit through: its billows a soft grey where they turn from the light, never
     // the shaded water's darks)
     let shK = (1.0 - smoothstep(0.3, 0.85, lt)) * (1.0 - 0.45 * smoothstep(0.9, 1.2, yr));
-    let under = smoothstep(-0.05, -0.5, Nw.y);            // the curl's underside
+    let under = smoothstep(-0.05, -0.5, Nw.y) * (1.0 - smoothstep(0.95, 1.08, P.y / max(BF.z, 1.0)));  // the curl's underside (not a burst's)
     let apron = (1.0 - smoothstep(0.07, 0.17, yr)) * smoothstep(8.0, 11.0, fw);
     let faceK = smoothstep(0.1, 0.45, toV) * (1.0 - apron) * (1.0 - smoothstep(0.86, 0.97, yr));
     let back = smoothstep(2.5, -3.0, fw) * smoothstep(-0.2, 0.3, Nw.y);
@@ -1425,7 +1429,11 @@ fn fs(v: VOut) -> @location(0) vec4f {
     let low = 1.0 - smoothstep(0.95, 1.7, yr);
     let thin = mix(1.0, 0.3, smoothstep(1.3, 3.2, yr));
     let brk = smoothstep(0.42, 0.7, fold);
-    w = max(w, top * (0.03 + 0.2 * shK * shK + 0.1 * brk + 0.16 * low * brk) * thin);
+    let fine = smoothstep(0.42, 0.72, lodNoise(P * vec3f(1.0, 0.35, 1.0) + 7.0, max(px * 5.0, 0.15)));
+    w = max(w, top * (0.02 + 0.04 * shK * shK + 0.02 * brk + 0.22 * low * low * fine) * thin);
+    // (higher, the spray a speckle of fine grey droplets over paper, thinning toward its torn top: never a flat white slab)
+    let speck = smoothstep(0.5, 0.78, lodNoise(P * vec3f(1.0, 0.6, 1.0) + 21.0, max(px * 2.5, 0.08))) * smoothstep(0.35, 0.65, lodNoise(P * 0.5 + 3.0, max(px * 12.0, 0.6)));
+    w = max(w, top * spray * 0.16 * speck * (1.0 - smoothstep(2.0, 4.2, yr)));
     w = max(w, back * (1.0 - spray) * (0.13 + 0.08 * shK) * (1.0 - 0.7 * pour));
     let apS = smoothstep(0.5, 0.8, lodNoise(vec3f(BF.x * 0.08, 0.0, BF.y * 0.5) + 5.0, max(px * 8.0, 0.3)));
     w = mix(w, 0.04 + 0.12 * apS, apron);
