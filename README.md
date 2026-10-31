@@ -4,7 +4,7 @@
 
 A WebGPU engine, in TypeScript, for walkable worlds painted as Chinese ink. Its first world is 临安, exported from
 [Keith-CY/linan](https://github.com/Keith-CY/linan): walk it at https://linan.lapla.si (`examples/linan`, linan's
-interface over Mo; the city is 191 MiB packed, 114 MiB of it at the start, each building's finer levels fetched as you
+interface over Mo; the city is 187 MiB packed, 113 MiB of it at the start, each building's finer levels fetched as you
 come near). Design: `docs/ARCHITECTURE.md`; the scene files it reads: `docs/SCENE_FORMAT.md`; what comes next:
 `docs/PLAN.md`.
 
@@ -12,6 +12,10 @@ Two painters turn the G-buffer into ink. Painter 2 (the default, `src/render/pai
 one that made its approved stills, ported pass for pass: a tone from albedo × light with each look's levels baked at
 its viewpoint, its ½ and ⅛ blurs, the light on the form, brush outlines through a jump flood, where each pixel sits in
 its mass, and the washes, marks and lines of 纯水墨. Painter 1 (`?p2=0`) is Mo's first, one pass.
+
+Water can be modelled, not only a flat plane: within a region a scene gives, the surface is a grid lifted on the GPU
+by crested waves, and a tidal bore stands across it as the same water rising (`src/water/`, `src/shaders/water.wgsl`),
+so 六和塔's bore grows out of the river with no seam; the painter reads the heights for its crests, troughs and chop.
 
 ![Walking 苏堤 through a bridge's arch, captured with tools/capture.mjs](docs/img/walk.webp)
 
